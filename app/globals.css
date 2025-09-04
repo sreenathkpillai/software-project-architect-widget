@@ -1,0 +1,90 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Widget Theme Variables */
+:root {
+  --widget-primary-color: #3B82F6;
+  --widget-secondary-color: #10B981;
+  --widget-border-radius: 8px;
+  --widget-font-family: 'Inter', sans-serif;
+  --widget-spacing-unit: 1rem;
+  --widget-background-color: #F9FAFB;
+  --widget-text-color: #1F2937;
+}
+
+/* Apply theme variables to components */
+.widget-themed {
+  font-family: var(--widget-font-family);
+  background-color: var(--widget-background-color);
+  color: var(--widget-text-color);
+}
+
+.widget-primary {
+  background-color: var(--widget-primary-color);
+}
+
+.widget-secondary {
+  background-color: var(--widget-secondary-color);
+}
+
+.widget-rounded {
+  border-radius: var(--widget-border-radius);
+}
+
+.widget-spacing {
+  padding: var(--widget-spacing-unit);
+}
+
+/* Custom slider styles for theme consistency */
+.slider::-webkit-slider-thumb {
+  appearance: none;
+  height: 18px;
+  width: 18px;
+  border-radius: 50%;
+  background: var(--widget-primary-color);
+  cursor: pointer;
+  box-shadow: 0 0 2px 0 rgba(0, 0, 0, 0.2);
+}
+
+.slider::-webkit-slider-track {
+  height: 8px;
+  border-radius: 4px;
+  background: #E5E7EB;
+}
+
+.slider::-moz-range-thumb {
+  height: 18px;
+  width: 18px;
+  border-radius: 50%;
+  background: var(--widget-primary-color);
+  cursor: pointer;
+  border: none;
+}
+
+.slider::-moz-range-track {
+  height: 8px;
+  border-radius: 4px;
+  background: #E5E7EB;
+}
+
+/* Timeline slider custom styling */
+.slider::-webkit-slider-thumb {
+  appearance: none;
+  height: 16px;
+  width: 16px;
+  border-radius: 50%;
+  background: #3b82f6;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.slider::-moz-range-thumb {
+  height: 16px;
+  width: 16px;
+  border-radius: 50%;
+  background: #3b82f6;
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}

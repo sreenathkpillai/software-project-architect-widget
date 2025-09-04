@@ -1,0 +1,163 @@
+/* Widget theming using CSS custom properties for Chain Catalyst */
+
+/* Default Chain Catalyst theme values - Dark purple gradient with white text */
+:root {
+  --widget-primary: linear-gradient(135deg, #10b981 0%, #3b82f6 100%);
+  --widget-secondary: #253d63;
+  --widget-accent: #f97316;
+  --widget-background: linear-gradient(135deg, #271c48 0%, #431c6d 50%, #581889 100%);
+  --widget-surface: rgba(255, 255, 255, 0.1);
+  --widget-text-primary: #ffffff;
+  --widget-text-secondary: #e2e8f0;
+  --widget-text-muted: #cbd5e1;
+  --widget-hover: #1d3456;
+  --widget-active: #253d63;
+  --widget-disabled: rgba(255, 255, 255, 0.2);
+  --widget-success: #10b981;
+  --widget-warning: #f59e0b;
+  --widget-error: #ef4444;
+  --widget-info: #06b6d4;
+  --widget-font-family: 'Inter, system-ui, sans-serif';
+  --widget-font-size-small: 0.875rem;
+  --widget-font-size-base: 1rem;
+  --widget-font-size-large: 1.125rem;
+  --widget-font-size-xlarge: 1.25rem;
+  --widget-font-weight-normal: 400;
+  --widget-font-weight-medium: 500;
+  --widget-font-weight-bold: 600;
+  --widget-spacing-small: 0.5rem;
+  --widget-spacing-medium: 1rem;
+  --widget-spacing-large: 2rem;
+  --widget-border-radius-small: 4px;
+  --widget-border-radius-medium: 8px;
+  --widget-border-radius-large: 12px;
+  --widget-border-color: rgba(255, 255, 255, 0.3);
+  --widget-shadow-small: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --widget-shadow-medium: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+  --widget-shadow-large: 0 10px 15px -3px rgb(0 0 0 / 0.1);
+}
+
+/* Widget-specific component styling for purple gradient theme */
+
+/* Primary button with green-to-blue gradient accent */
+.widget-button {
+  background: var(--widget-primary);
+  color: var(--widget-text-primary);
+  border-radius: var(--widget-border-radius-medium);
+  padding: var(--widget-spacing-medium);
+  box-shadow: var(--widget-shadow-medium);
+  transition: opacity 0.2s ease;
+  border: none;
+}
+
+.widget-button:hover {
+  opacity: 0.9;
+}
+
+.widget-button:disabled {
+  background: var(--widget-primary);
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+/* Send button with orange accent */
+.widget-button-send {
+  background: var(--widget-accent);
+  color: white;
+  border-radius: var(--widget-border-radius-medium);
+  padding: var(--widget-spacing-medium);
+  box-shadow: var(--widget-shadow-medium);
+  transition: opacity 0.2s ease;
+  border: none;
+}
+
+.widget-button-send:hover {
+  opacity: 0.9;
+}
+
+.widget-button-send:disabled {
+  background: var(--widget-accent);
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+/* Secondary button with blue accent */
+.widget-button-secondary {
+  background: var(--widget-secondary);
+  color: var(--widget-text-primary);
+  border-radius: var(--widget-border-radius-medium);
+  padding: var(--widget-spacing-medium);
+  box-shadow: var(--widget-shadow-medium);
+  transition: opacity 0.2s ease;
+  border: none;
+}
+
+.widget-button-secondary:hover {
+  background: var(--widget-hover);
+}
+
+.widget-card {
+  background: var(--widget-surface);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: var(--widget-border-radius-medium);
+  box-shadow: var(--widget-shadow-small);
+}
+
+.widget-input {
+  background: var(--widget-surface);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: var(--widget-border-radius-medium);
+  color: var(--widget-text-primary);
+}
+
+.widget-input:focus {
+  border-color: var(--widget-primary);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.3);
+}
+
+.widget-input::placeholder {
+  color: var(--widget-text-muted);
+}
+
+.widget-input option {
+  background: var(--widget-primary);
+  color: var(--widget-text-primary);
+}
+
+.widget-slider {
+  background: var(--widget-disabled);
+  border-radius: var(--widget-border-radius-medium);
+  appearance: none;
+  height: 8px;
+}
+
+.widget-slider::-webkit-slider-thumb {
+  background: var(--widget-primary);
+  border-radius: 50%;
+  border: none;
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+  appearance: none;
+}
+
+.widget-slider::-moz-range-thumb {
+  background: var(--widget-primary);
+  border-radius: 50%;
+  border: none;
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+}
+
+/* Subtle pulse animation for empty input */
+@keyframes subtle-pulse {
+  0%, 100% { 
+    border-color: rgba(255, 255, 255, 0.6);
+    box-shadow: 0 0 8px rgba(255, 255, 255, 0.2);
+  }
+  50% { 
+    border-color: rgba(255, 255, 255, 0.8);
+    box-shadow: 0 0 12px rgba(255, 255, 255, 0.3);
+  }
+}
