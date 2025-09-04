@@ -88,3 +88,84 @@
   border: none;
   box-shadow: 0 2px 4px rgba(0,0,0,0.2);
 }
+
+/* Markdown Content Styles */
+.markdown-content h1 { 
+  @apply text-3xl font-bold mb-4 text-gray-900; 
+}
+
+.markdown-content h2 { 
+  @apply text-2xl font-semibold mb-3 text-gray-800; 
+}
+
+.markdown-content h3 { 
+  @apply text-xl font-medium mb-2 text-gray-800; 
+}
+
+.markdown-content h4 { 
+  @apply text-lg font-medium mb-2 text-gray-700; 
+}
+
+.markdown-content h5 { 
+  @apply text-base font-medium mb-1 text-gray-700; 
+}
+
+.markdown-content h6 { 
+  @apply text-sm font-medium mb-1 text-gray-600; 
+}
+
+.markdown-content p { 
+  @apply mb-4 leading-relaxed text-gray-700; 
+}
+
+.markdown-content ul, .markdown-content ol { 
+  @apply mb-4 pl-6; 
+}
+
+.markdown-content li { 
+  @apply mb-1; 
+}
+
+.markdown-content pre { 
+  @apply bg-gray-100 p-4 rounded-lg overflow-x-auto mb-4 border; 
+}
+
+.markdown-content code { 
+  @apply bg-gray-100 px-2 py-1 rounded font-mono text-sm; 
+}
+
+.markdown-content pre code { 
+  @apply bg-transparent px-0 py-0; 
+}
+
+.markdown-content blockquote { 
+  @apply border-l-4 border-gray-300 pl-4 italic mb-4 text-gray-600; 
+}
+
+.markdown-content table { 
+  @apply w-full border-collapse border border-gray-300 mb-4; 
+}
+
+.markdown-content th, .markdown-content td { 
+  @apply border border-gray-300 px-3 py-2; 
+}
+
+.markdown-content th { 
+  @apply bg-gray-100 font-medium; 
+}
+
+.markdown-content a { 
+  @apply text-blue-600 hover:text-blue-800 underline; 
+}
+
+.markdown-content hr { 
+  @apply my-6 border-gray-300; 
+}
+
+/* Line clamp utility for text truncation */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

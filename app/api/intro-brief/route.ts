@@ -62,7 +62,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Either userSession or externalId is required' }, { status: 400 });
     }
 
-    const where = userSession ? { userSession } : { externalId };
+    const where = userSession ? { userSession } : { externalId: externalId! };
     const introBrief = await prisma.introBrief.findFirst({
       where,
       orderBy: { createdAt: 'desc' }

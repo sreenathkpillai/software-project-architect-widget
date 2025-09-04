@@ -24,6 +24,7 @@ interface ChatProps {
   introBrief?: IntroBrief | null;
   onBackToIntro?: () => void;
   onNewProject?: () => void;
+  onViewDocuments?: () => void;
   themeConfig?: ThemeConfig;
   widgetTheme?: WidgetTheme;
   externalId?: string;
@@ -35,6 +36,7 @@ export default function Chat({
   introBrief = null, 
   onBackToIntro, 
   onNewProject, 
+  onViewDocuments,
   themeConfig,
   widgetTheme,
   externalId: propExternalId,
@@ -53,6 +55,7 @@ export default function Chat({
   const [externalId, setExternalId] = useState('');
   const [savedSessions, setSavedSessions] = useState<any[]>([]);
   const [isWidget, setIsWidget] = useState(false);
+  const [sessionComplete, setSessionComplete] = useState(false);
 
   // Initialize external ID and session on component mount
   useEffect(() => {
@@ -169,6 +172,11 @@ export default function Chat({
       
       if (response.ok) {
         setMessages([...newMessages, { role: 'assistant', content: data.text }]);
+        
+        // Check if session is complete
+        if (data.sessionComplete) {
+          setSessionComplete(true);
+        }
         
         // Update completed docs if a document was created
         if (data.functions_called && data.functions_called > 0) {
@@ -319,11 +327,11 @@ Now let's dive deep into the technical architecture. I'll focus on the technical
         fontFamily: 'var(--widget-font-family)',
         color: 'var(--widget-text-primary)',
         // Legacy theme support
-        '--primary-color': themeConfig?.primaryColor || '#6366f1',
-        '--secondary-color': themeConfig?.secondaryColor || '#8b5cf6',
-        '--border-radius': themeConfig?.borderRadius || '8px',
-        '--font-family': themeConfig?.fontFamily || 'Inter, sans-serif',
-        '--spacing-unit': themeConfig?.spacingUnit || '1rem',
+        ['--primary-color' as any]: themeConfig?.primaryColor || '#6366f1',
+        ['--secondary-color' as any]: themeConfig?.secondaryColor || '#8b5cf6',
+        ['--border-radius' as any]: themeConfig?.borderRadius || '8px',
+        ['--font-family' as any]: themeConfig?.fontFamily || 'Inter, sans-serif',
+        ['--spacing-unit' as any]: themeConfig?.spacingUnit || '1rem',
       }}
     >
       {/* Page Header - Hidden in widget mode */}
@@ -520,8 +528,8 @@ Now let's dive deep into the technical architecture. I'll focus on the technical
                 <div className="flex items-center space-x-2">
                   <div className="flex space-x-1">
                     <div style={{backgroundColor: 'white'}} className="w-2 h-2 rounded-full animate-bounce"></div>
-                    <div style={{backgroundColor: 'white'}} className="w-2 h-2 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
-                    <div style={{backgroundColor: 'white'}} className="w-2 h-2 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                    <div style={{backgroundColor: 'white', animationDelay: '0.1s'}} className="w-2 h-2 rounded-full animate-bounce"></div>
+                    <div style={{backgroundColor: 'white', animationDelay: '0.2s'}} className="w-2 h-2 rounded-full animate-bounce"></div>
                   </div>
                   <span style={{color: 'white'}} className="text-sm ml-3">{loadingText}</span>
                 </div>
@@ -531,6 +539,22 @@ Now let's dive deep into the technical architecture. I'll focus on the technical
         </div>
         
         <div style={{background: 'var(--widget-surface)', borderTopColor: 'var(--widget-border-color)'}} className="border-t p-4 flex-shrink-0">
+          {sessionComplete && onViewDocuments && (
+            <div className="mb-4">
+              <button
+                onClick={onViewDocuments}
+                style={{
+                  background: 'linear-gradient(135deg, var(--widget-success), #10b981)',
+                  color: 'white',
+                  borderRadius: 'var(--widget-border-radius-medium)'
+                }}
+                className="w-full py-3 px-4 hover:opacity-90 text-white font-medium transition-opacity flex items-center justify-center gap-2"
+              >
+                <span className="text-lg">📄</span>
+                View Generated Documents
+              </button>
+            </div>
+          )}
           <form onSubmit={sendMessage} className="flex gap-3">
             <input
               type="text"

@@ -3,9 +3,12 @@
 import { useState, useEffect } from 'react';
 import IntroChat from './IntroChat';
 import Chat from './chat';
+import DocumentViewer from './DocumentViewer/DocumentViewer';
 import { initializeWidgetAuth, widgetAuth, AuthVerificationResponse, ThemeConfig } from '@/lib/auth';
 import { useSession, SessionType, IntroBrief } from '@/hooks/useSession';
 import { WidgetTheme, chainCatalystTheme, applyTheme, parseThemeFromUrl } from '@/lib/theme';
+
+type WidgetMode = 'chat' | 'documents' | 'intro';
 
 interface WidgetAppProps {
   defaultSessionType?: SessionType;
@@ -18,6 +21,8 @@ export default function WidgetApp({ defaultSessionType = 'architect', skipIntro 
   const [authResponse, setAuthResponse] = useState<AuthVerificationResponse | null>(null);
   const [themeConfig, setThemeConfig] = useState<ThemeConfig | undefined>(undefined);
   const [widgetTheme, setWidgetTheme] = useState<WidgetTheme>(chainCatalystTheme);
+  const [currentMode, setCurrentMode] = useState<WidgetMode>('chat');
+  const [urlSessionId, setUrlSessionId] = useState<string | null>(null);
 
   const { 
     sessionState, 
@@ -28,6 +33,14 @@ export default function WidgetApp({ defaultSessionType = 'architect', skipIntro 
   } = useSession();
 
   useEffect(() => {
+    // Parse URL parameters for mode and session routing
+    const urlParams = new URLSearchParams(window.location.search);
+    const mode = urlParams.get('mode') as WidgetMode || 'chat';
+    const sessionId = urlParams.get('sessionId');
+    
+    setCurrentMode(mode);
+    setUrlSessionId(sessionId);
+    
     // Apply Chain Catalyst theme immediately as default
     applyTheme(chainCatalystTheme);
     setWidgetTheme(chainCatalystTheme);
@@ -120,19 +133,62 @@ export default function WidgetApp({ defaultSessionType = 'architect', skipIntro 
     );
   }
 
-  // Always render architect chat - skip intro entirely
-  console.log('🔧 WIDGET RENDERING:', { sessionType: sessionState.sessionType });
-  
+  // Handle different modes based on URL parameters and session state
+  console.log('🔧 WIDGET RENDERING:', { 
+    currentMode, 
+    sessionType: sessionState.sessionType, 
+    urlSessionId,
+    sessionId: sessionState.sessionId 
+  });
+
+  // Mode handlers
+  const handleViewDocuments = () => {
+    setCurrentMode('documents');
+  };
+
+  const handleBackToChat = () => {
+    setCurrentMode('chat');
+  };
+
+  // Render based on current mode
+  if (currentMode === 'documents') {
+    const sessionId = urlSessionId || sessionState.sessionId;
+    if (!sessionId) {
+      return (
+        <div className="h-screen flex items-center justify-center bg-gray-50">
+          <div className="text-center">
+            <p className="text-gray-600 mb-4">No session available for document view</p>
+            <button
+              onClick={handleBackToChat}
+              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+            >
+              Start New Chat
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <DocumentViewer
+        sessionId={sessionId}
+        externalId={sessionState.externalId}
+      />
+    );
+  }
+
+  // Default: Chat mode
   return (
     <Chat 
       introBrief={sessionState.introBrief}
       onBackToIntro={startNewIntro}
       onNewProject={startNewIntro}
+      onViewDocuments={handleViewDocuments}
       themeConfig={themeConfig}
       widgetTheme={widgetTheme}
       externalId={sessionState.externalId}
       sessionType="architect"
-      userSession={sessionState.sessionId}
+      userSession={urlSessionId || sessionState.sessionId}
     />
   );
 }

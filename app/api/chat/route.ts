@@ -578,11 +578,38 @@ async function handleOpenAIRequest(messages: any[], contextualPrompt: string, us
       if (!nextDocType) {
         // All documents are complete
         console.warn('All 13 documents completed for session:', userSession);
+        
+        // Mark session as complete via API
+        try {
+          const completionMessage = "🎉 All project documents are complete! Your full software architecture specification is ready.";
+          
+          // Call the completion API to mark session as complete
+          const completionResponse = await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:5000'}/api/sessions/${userSession}/complete`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              externalId,
+              completionMessage
+            }),
+          });
+
+          if (!completionResponse.ok) {
+            console.error('Failed to mark session as complete:', await completionResponse.text());
+          } else {
+            console.log('Session marked as complete successfully');
+          }
+        } catch (error) {
+          console.error('Error calling completion API:', error);
+        }
+        
         return NextResponse.json({ 
-          text: "🎉 All project documents are complete! Your full software architecture specification is ready. You can start a new project or review the generated documents.",
+          text: "🎉 All project documents are complete! Your full software architecture specification is ready. Click the 'View Generated Documents' button below to explore and download your documents.",
           functions_called: responseMessage.tool_calls.length,
           provider: 'openai-fallback-complete',
-          usage: null
+          usage: null,
+          sessionComplete: true // Add flag for frontend to show transition button
         });
       }
       

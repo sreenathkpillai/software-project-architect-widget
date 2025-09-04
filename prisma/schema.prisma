@@ -17,9 +17,11 @@ model Specification {
   skipTechnicalSummary Boolean           @default(false) @map("skip_technical_summary")
   userSession          String            @map("user_session")
   externalId           String            @default("sreeveTest123") @map("external_id")
+  order                Int               @default(0) // Document sequence order
   createdAt            DateTime          @default(now()) @map("created_at")
   updatedAt            DateTime          @updatedAt @map("updated_at")
 
+  @@index([userSession, documentType])
   @@map("specifications")
 }
 
@@ -37,15 +39,18 @@ model QuestionCount {
 }
 
 model SavedSession {
-  id           String @id @default(cuid())
-  userSession  String @unique @map("user_session")
-  externalId   String @map("external_id")
-  sessionName  String @map("session_name")
-  sessionType  String @default("architect") @map("session_type") // 'intro' or 'architect'
-  isComplete   Boolean @default(false) @map("is_complete")
-  lastActivity DateTime @default(now()) @map("last_activity")
-  createdAt    DateTime @default(now()) @map("created_at")
+  id               String @id @default(cuid())
+  userSession      String @unique @map("user_session")
+  externalId       String @map("external_id")
+  sessionName      String @map("session_name")
+  sessionType      String @default("architect") @map("session_type") // 'intro' or 'architect'
+  isComplete       Boolean @default(false) @map("is_complete")
+  completedAt      DateTime? @map("completed_at")
+  completionMessage String? @map("completion_message")
+  lastActivity     DateTime @default(now()) @map("last_activity")
+  createdAt        DateTime @default(now()) @map("created_at")
   
+  @@index([externalId, isComplete])
   @@map("saved_sessions")
 }
 
