@@ -15,7 +15,12 @@ export async function GET(request: NextRequest) {
     if (userSession) {
       // Get specific session data including messages
       const sessionData = await prisma.savedSession.findUnique({
-        where: { userSession }
+        where: { userSession },
+        include: {
+          messages: {
+            orderBy: { order: 'asc' }
+          }
+        }
       });
 
       if (!sessionData || sessionData.externalId !== externalId) {
@@ -29,10 +34,11 @@ export async function GET(request: NextRequest) {
         orderBy: { createdAt: 'asc' }
       });
 
-      // For this MVP, we'll reconstruct a simple message history
-      const messages = [
-        { role: 'assistant', content: 'Welcome back! Continuing your saved project...' }
-      ];
+      // Return stored chat messages or empty array if no messages saved
+      const messages = sessionData.messages.map(msg => ({
+        role: msg.role,
+        content: msg.content
+      }));
 
       return NextResponse.json({
         messages,
@@ -64,27 +70,51 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const { userSession, externalId, sessionName, action, sessionType = 'architect' } = await request.json();
+    const { userSession, externalId, sessionName, action, sessionType = 'architect', messages = [] } = await request.json();
 
     if (!userSession || !externalId) {
       return NextResponse.json({ error: 'userSession and externalId required' }, { status: 400 });
     }
 
     if (action === 'save') {
-      // Save or update session
-      await prisma.savedSession.upsert({
-        where: { userSession },
-        update: { 
-          sessionName,
-          sessionType,
-          lastActivity: new Date()
-        },
-        create: {
-          userSession,
-          externalId,
-          sessionName,
-          sessionType,
-          lastActivity: new Date()
+      // Use a transaction to save session and messages atomically
+      await prisma.$transaction(async (tx) => {
+        // Save or update session
+        await tx.savedSession.upsert({
+          where: { userSession },
+          update: { 
+            sessionName,
+            sessionType,
+            lastActivity: new Date()
+          },
+          create: {
+            userSession,
+            externalId,
+            sessionName,
+            sessionType,
+            lastActivity: new Date()
+          }
+        });
+
+        // Only save chat messages for incomplete sessions and if messages exist
+        if (messages.length > 0) {
+          // Delete existing messages for this session first
+          await tx.chatMessage.deleteMany({
+            where: { sessionId: userSession }
+          });
+
+          // Create new messages with preserved order
+          const messageData = messages.map((msg: any, index: number) => ({
+            sessionId: userSession,
+            role: msg.role,
+            content: msg.content,
+            order: index,
+            timestamp: new Date()
+          }));
+
+          await tx.chatMessage.createMany({
+            data: messageData
+          });
         }
       });
 

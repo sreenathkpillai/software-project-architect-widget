@@ -7,85 +7,101 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Specification {
-  id                   String            @id @default(cuid())
-  filename             String
-  content              String
-  documentType         SpecificationType @map("document_type")
-  description          String
-  nextSteps            String?           @map("next_steps")
-  skipTechnicalSummary Boolean           @default(false) @map("skip_technical_summary")
-  userSession          String            @map("user_session")
-  externalId           String            @default("sreeveTest123") @map("external_id")
-  order                Int               @default(0) // Document sequence order
-  createdAt            DateTime          @default(now()) @map("created_at")
-  updatedAt            DateTime          @updatedAt @map("updated_at")
+model IntroBrief {
+  id                String   @id @default(cuid())
+  userSession       String   @unique @map("user_session")
+  externalId        String   @map("external_id")
+  whatTheyreDoing   String?  @map("what_theyre_doing")
+  projectType       String?  @map("project_type")
+  audience          String?
+  problem           String?
+  timeline          String?
+  teamSize          String?  @map("team_size")
+  currentQuestion   Int      @default(0) @map("current_question")
+  isComplete        Boolean  @default(false) @map("is_complete")
+  projectBrief      String?  @map("project_brief")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
 
-  @@index([userSession, documentType])
-  @@map("specifications")
+  @@map("intro_briefs")
 }
 
 model QuestionCount {
-  id           String @id @default(cuid())
-  userSession  String @map("user_session")
-  documentType String @map("document_type")
-  questionsAsked Int @default(0) @map("questions_asked")
-  externalId   String @default("sreeveTest123") @map("external_id")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
-  
+  id              String   @id @default(cuid())
+  userSession     String   @map("user_session")
+  documentType    String   @map("document_type")
+  questionsAsked  Int      @default(0) @map("questions_asked")
+  externalId      String   @default("sreeveTest123") @map("external_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
   @@unique([userSession, documentType])
   @@map("question_counts")
 }
 
 model SavedSession {
-  id               String @id @default(cuid())
-  userSession      String @unique @map("user_session")
-  externalId       String @map("external_id")
-  sessionName      String @map("session_name")
-  sessionType      String @default("architect") @map("session_type") // 'intro' or 'architect'
-  isComplete       Boolean @default(false) @map("is_complete")
-  completedAt      DateTime? @map("completed_at")
-  completionMessage String? @map("completion_message")
-  lastActivity     DateTime @default(now()) @map("last_activity")
-  createdAt        DateTime @default(now()) @map("created_at")
+  id                String    @id @default(cuid())
+  userSession       String    @unique @map("user_session")
+  externalId        String    @map("external_id")
+  sessionName       String    @map("session_name")
+  sessionType       String    @default("architect") @map("session_type")
+  isComplete        Boolean   @default(false) @map("is_complete")
+  completedAt       DateTime? @map("completed_at")
+  completionMessage String?   @map("completion_message")
+  lastActivity      DateTime  @default(now()) @map("last_activity")
+  createdAt         DateTime  @default(now()) @map("created_at")
   
+  messages          ChatMessage[]
+
   @@index([externalId, isComplete])
   @@map("saved_sessions")
 }
 
-model IntroBrief {
-  id                String @id @default(cuid())
-  userSession       String @unique @map("user_session")
-  externalId        String @map("external_id")
-  whatTheyreDoing   String? @map("what_theyre_doing") // Question 0: What are you trying to create?
-  projectType       String? @map("project_type") // Question 1: What kind of software?
-  audience          String? @map("audience") // Question 2: Who will use this?
-  problem           String? @map("problem") // Question 3: What problem does it solve?
-  timeline          String? @map("timeline") // Question 4: How soon do you need it?
-  teamSize          String? @map("team_size") // Question 5: What's your team size?
-  currentQuestion   Int @default(0) @map("current_question") // Track progress through questions
-  isComplete        Boolean @default(false) @map("is_complete")
-  projectBrief      String? @map("project_brief") // Generated brief for architect handoff
-  createdAt         DateTime @default(now()) @map("created_at")
-  updatedAt         DateTime @updatedAt @map("updated_at")
+model ChatMessage {
+  id          String   @id @default(cuid())
+  sessionId   String   @map("session_id")
+  role        String   // 'user' or 'assistant'
+  content     String
+  timestamp   DateTime @default(now())
+  order       Int      // Message order in conversation
   
-  @@map("intro_briefs")
+  session     SavedSession @relation(fields: [sessionId], references: [userSession])
+  
+  @@index([sessionId, order])
+  @@map("chat_messages")
+}
+
+model Specification {
+  id                    String             @id @default(cuid())
+  filename              String
+  content               String
+  documentType          specification_type @map("document_type")
+  description           String
+  nextSteps             String?            @map("next_steps")
+  skipTechnicalSummary  Boolean            @default(false) @map("skip_technical_summary")
+  userSession           String             @map("user_session")
+  createdAt             DateTime           @default(now()) @map("created_at")
+  updatedAt             DateTime           @updatedAt @map("updated_at")
+  externalId            String             @default("sreeveTest123") @map("external_id")
+  order                 Int                @default(0)
+
+  @@index([userSession, documentType])
+  @@map("specifications")
 }
 
 model ToolUsage {
-  id           String @id @default(cuid())
-  externalId   String @map("external_id")
-  usageType    String @map("usage_type") // 'session_complete', 'session_saved', 'intro_complete'
-  userSession  String @map("user_session")
+  id           String   @id @default(cuid())
+  externalId   String   @map("external_id")
+  usageType    String   @map("usage_type")
+  userSession  String   @map("user_session")
   createdAt    DateTime @default(now()) @map("created_at")
-  month        Int // YYYYMM format for monthly tracking
-  
-  @@map("tool_usage")
+  month        Int
+
   @@index([externalId, month])
+  @@map("tool_usage")
 }
 
-enum SpecificationType {
+enum specification_type {
   prd
   frontend
   backend
@@ -99,6 +115,4 @@ enum SpecificationType {
   user_flow
   third_party_libraries
   readme
-
-  @@map("specification_type")
 }

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { widgetAuth, ThemeConfig } from '@/lib/auth';
 import { WidgetTheme } from '@/lib/theme';
+import SaveSessionModal from './SaveSessionModal';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -56,6 +57,10 @@ export default function Chat({
   const [savedSessions, setSavedSessions] = useState<any[]>([]);
   const [isWidget, setIsWidget] = useState(false);
   const [sessionComplete, setSessionComplete] = useState(false);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [isSavingSession, setIsSavingSession] = useState(false);
+  const [isLoadingSession, setIsLoadingSession] = useState(false);
+  const [loadSuccessMessage, setLoadSuccessMessage] = useState<string | null>(null);
 
   // Initialize external ID and session on component mount
   useEffect(() => {
@@ -231,11 +236,15 @@ export default function Chat({
     }
   };
 
-  const saveSession = async () => {
+  const handleSaveSessionClick = () => {
+    if (!userSession || !externalId || messages.length === 0 || sessionComplete) return;
+    setShowSaveModal(true);
+  };
+
+  const saveSession = async (sessionName: string) => {
     if (!userSession || !externalId) return;
     
-    const sessionName = prompt('Enter a name for this session:');
-    if (!sessionName) return;
+    setIsSavingSession(true);
     
     try {
       const response = await fetch('/api/sessions', {
@@ -245,33 +254,77 @@ export default function Chat({
           userSession, 
           externalId, 
           sessionName,
+          messages: messages, // Include chat history
           action: 'save'
         })
       });
       
       if (response.ok) {
         loadSavedSessions(externalId);
-        alert('Session saved successfully!');
+        setShowSaveModal(false);
+        // Could show a toast notification here instead of alert
+      } else {
+        const errorData = await response.json();
+        console.error('Failed to save session:', errorData);
       }
     } catch (error) {
       console.error('Failed to save session:', error);
-      alert('Failed to save session');
+    } finally {
+      setIsSavingSession(false);
     }
   };
 
   const loadSession = async (sessionId: string) => {
+    if (isLoadingSession || isLoading) return;
+    
+    setIsLoadingSession(true);
+    
     try {
-      const response = await fetch(`/api/sessions?userSession=${sessionId}&externalId=${externalId}`);
+      const response = await fetch(`/api/sessions/${sessionId}/load?externalId=${externalId}`);
+      
       if (response.ok) {
         const data = await response.json();
-        setMessages(data.messages || []);
+        
+        // Restore chat messages with proper Message interface
+        const restoredMessages: Message[] = (data.messages || []).map((msg: any) => ({
+          role: msg.role as 'user' | 'assistant',
+          content: msg.content
+        }));
+        
+        setMessages(restoredMessages);
         setCompletedDocs(data.completedDocs || []);
         setUserSession(sessionId);
         localStorage.setItem('userSession', sessionId);
+        
+        // Scroll to bottom after loading messages
+        setTimeout(() => {
+          const chatContainer = document.querySelector('.overflow-y-auto');
+          if (chatContainer) {
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+          }
+        }, 100);
+        
+        // Show success feedback
+        const sessionName = data.sessionName || 'session';
+        setLoadSuccessMessage(`Loaded session: ${sessionName}`);
+        
+        // Clear success message after 3 seconds
+        setTimeout(() => {
+          setLoadSuccessMessage(null);
+        }, 3000);
+        
+      } else {
+        const errorData = await response.json();
+        console.error('Failed to load session:', errorData);
+        // Force re-render of saved sessions to reset dropdown
+        loadSavedSessions(externalId);
       }
     } catch (error) {
       console.error('Failed to load session:', error);
-      alert('Failed to load session');
+      // Force re-render of saved sessions to reset dropdown
+      loadSavedSessions(externalId);
+    } finally {
+      setIsLoadingSession(false);
     }
   };
 
@@ -448,12 +501,15 @@ Now let's dive deep into the technical architecture. I'll focus on the technical
               Saved Sessions
             </label>
             <select
+              key={`sessions-${savedSessions.length}-${isLoadingSession}`}
               onChange={(e) => e.target.value && loadSession(e.target.value)}
               className="widget-input w-full p-2 text-sm"
-              disabled={isLoading}
+              disabled={isLoading || isLoadingSession}
               defaultValue=""
             >
-              <option value="">Load a saved session...</option>
+              <option value="">
+                {isLoadingSession ? 'Loading session...' : 'Load a saved session...'}
+              </option>
               {savedSessions.map((session) => (
                 <option key={session.userSession} value={session.userSession}>
                   {session.sessionName}
@@ -463,14 +519,32 @@ Now let's dive deep into the technical architecture. I'll focus on the technical
           </div>
         )}
 
+        {/* Load Success Message */}
+        {loadSuccessMessage && (
+          <div 
+            style={{
+              background: 'var(--widget-status-success)',
+              borderRadius: 'var(--widget-border-radius-medium)',
+              padding: 'var(--widget-spacing-small)',
+              marginBottom: 'var(--widget-spacing-medium)',
+              color: 'white',
+              fontSize: 'var(--widget-font-size-small)',
+              textAlign: 'center'
+            }}
+            className="animate-fade-in"
+          >
+            ✓ {loadSuccessMessage}
+          </div>
+        )}
+
         {/* Session Management Buttons */}
         <div className="space-y-2">
           <button
-            onClick={saveSession}
+            onClick={handleSaveSessionClick}
             className="widget-button-send w-full px-4 py-2 font-medium"
-            disabled={isLoading || messages.length === 0}
+            disabled={isLoading || messages.length === 0 || isSavingSession || sessionComplete}
           >
-            Save Session
+            {isSavingSession ? 'Saving...' : sessionComplete ? 'Session Complete' : 'Save Session'}
           </button>
           
           <button
@@ -650,6 +724,15 @@ Now let's dive deep into the technical architecture. I'll focus on the technical
         </div>
       </div>
       </div>
+
+      {/* Save Session Modal */}
+      <SaveSessionModal
+        isOpen={showSaveModal}
+        onClose={() => !isSavingSession && setShowSaveModal(false)}
+        onSave={saveSession}
+        isLoading={isSavingSession}
+        defaultName={`Session ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`}
+      />
     </div>
   );
 }
