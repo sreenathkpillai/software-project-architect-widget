@@ -131,6 +131,7 @@
             
             <button class="btn" onclick="loadWidget()">Load Widget</button>
             <button class="btn" onclick="testAuth()">Test Auth</button>
+            <button class="btn" onclick="updateAuth()">Update Auth</button>
             <button class="btn" onclick="clearWidget()">Clear</button>
         </div>
         
@@ -201,15 +202,25 @@
             const mode = document.getElementById('widgetMode').value;
             const token = generateAuthToken();
             
-            // Construct widget URL with parameters
+            // 🐛 DEBUG: Log what we're sending to the widget
+            console.log('📦 PARENT: Loading widget with params:', {
+                token: token.substring(0, 20) + '...',
+                externalId,
+                mode,
+                parent: window.location.origin
+            });
+            
+            // Construct widget URL with parameters - add authEndpoint for verification
             const params = new URLSearchParams({
                 token: token,
                 externalId: externalId,
+                authEndpoint: `${API_BASE_URL}/auth/verify-token`,
                 mode: mode,
                 parent: window.location.origin
             });
             
-            const widgetUrl = `${WIDGET_BASE_URL}?${params.toString()}`;
+            const widgetUrl = `${WIDGET_BASE_URL}/widget?${params.toString()}`;
+            console.log('📦 PARENT: Widget URL:', widgetUrl);
             
             // Create iframe
             const iframe = document.createElement('iframe');
@@ -225,20 +236,26 @@
             updateStatus(`Widget loaded: ${mode} mode for user ${externalId}`);
             
             // Listen for messages from widget
+            window.removeEventListener('message', handleWidgetMessage); // Remove existing listener
             window.addEventListener('message', handleWidgetMessage);
+            
+            // Store iframe reference for later communication
+            window.widgetIframe = iframe;
         }
         
         function handleWidgetMessage(event) {
-            // Verify origin for security
-            if (event.origin !== WIDGET_BASE_URL) {
+            // Verify origin for security (allow localhost for development)
+            const allowedOrigins = [WIDGET_BASE_URL, 'http://localhost:3000'];
+            if (!allowedOrigins.includes(event.origin)) {
+                console.log('📦 PARENT: Ignoring message from unknown origin:', event.origin);
                 return;
             }
             
-            console.log('Widget message:', event.data);
+            console.log('📦 PARENT: Received widget message:', event.data);
             
             switch (event.data.type) {
-                case 'widget_ready':
-                    updateStatus('Widget initialized and ready');
+                case 'WIDGET_READY':
+                    updateStatus(`Widget initialized and ready with externalId: ${event.data.externalId}`);
                     break;
                     
                 case 'intro_complete':
@@ -295,9 +312,32 @@
             }
         }
         
+        function updateAuth() {
+            if (!window.widgetIframe) {
+                updateStatus('No widget loaded. Load widget first.');
+                return;
+            }
+            
+            // Simulate auth update with new external ID
+            const newExternalId = `updated_${document.getElementById('externalId').value}_${Date.now()}`;
+            const newToken = generateAuthToken();
+            
+            console.log('📦 PARENT: Sending auth update:', { newExternalId, hasToken: !!newToken });
+            
+            // Send auth update to widget
+            window.widgetIframe.contentWindow.postMessage({
+                type: 'AUTH_UPDATE',
+                token: newToken,
+                externalId: newExternalId
+            }, WIDGET_BASE_URL);
+            
+            updateStatus(`Sent auth update with externalId: ${newExternalId}`);
+        }
+        
         function clearWidget() {
             document.getElementById('widgetContainer').innerHTML = '';
             document.getElementById('authTest').style.display = 'none';
+            window.widgetIframe = null;
             updateStatus('Widget cleared');
         }
         

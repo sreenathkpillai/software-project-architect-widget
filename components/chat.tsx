@@ -181,6 +181,14 @@ export default function Chat({
         // Check if session is complete
         if (data.sessionComplete) {
           setSessionComplete(true);
+          
+          // Auto-transition to document viewer after a short delay
+          if (onViewDocuments) {
+            setTimeout(() => {
+              console.log('🎉 Session complete! Auto-transitioning to document viewer...');
+              onViewDocuments();
+            }, 2000); // 2 second delay to let user see the completion message
+          }
         }
         
         // Update completed docs if a document was created

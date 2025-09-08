@@ -1,4 +1,5 @@
 import WidgetApp from '@/components/WidgetApp';
+import { AuthProvider } from '@/lib/auth-store';
 
 interface PageProps {
   searchParams: {
@@ -12,9 +13,11 @@ export default function WidgetPage({ searchParams }: PageProps) {
   const sessionType = searchParams.sessionType || 'architect'; // Default to architect
 
   return (
-    <WidgetApp 
-      defaultSessionType={sessionType}
-      skipIntro={skipIntro}
-    />
+    <AuthProvider>
+      <WidgetApp 
+        defaultSessionType={sessionType}
+        skipIntro={skipIntro}
+      />
+    </AuthProvider>
   );
 }

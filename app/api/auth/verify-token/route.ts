@@ -15,9 +15,19 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(request: NextRequest) {
   try {
-    const { token, parentAppUrl } = await request.json();
+    const body = await request.json();
+    const { token, parentAppUrl } = body;
+    
+    // 🐛 DEBUG: Log verification request
+    console.log('🔐 API DEBUG: Auth verification request:', {
+      hasToken: !!token,
+      tokenPreview: token ? token.substring(0, 20) + '...' : 'none',
+      parentAppUrl,
+      fullBody: body
+    });
 
     if (!token) {
+      console.log('🔐 API DEBUG: No token provided');
       return NextResponse.json({ 
         valid: false, 
         error: 'Token required' 
@@ -25,7 +35,9 @@ export async function POST(request: NextRequest) {
     }
 
     // For standalone widget operation, we'll implement multiple verification strategies
-    const verificationStrategy = process.env.AUTH_VERIFICATION_STRATEGY || 'jwt_secret';
+    const verificationStrategy = process.env.AUTH_VERIFICATION_STRATEGY || 'bypass_dev';
+    
+    console.log('🔐 API DEBUG: Using verification strategy:', verificationStrategy);
 
     switch (verificationStrategy) {
       case 'parent_app_endpoint':
@@ -36,6 +48,7 @@ export async function POST(request: NextRequest) {
       
       case 'bypass_dev':
         // Development mode bypass - only use in dev environment
+        console.log('🔐 API DEBUG: Using bypass_dev strategy, NODE_ENV:', process.env.NODE_ENV);
         if (process.env.NODE_ENV === 'development') {
           return await bypassForDevelopment(token);
         }
@@ -158,10 +171,13 @@ async function verifyViaSharedSecret(token: string) {
  */
 async function bypassForDevelopment(token: string) {
   // Extract mock data from token for development
+  console.log('🔐 API DEBUG: bypassForDevelopment called with token:', token.substring(0, 50) + '...');
+  
   try {
     const mockData = JSON.parse(Buffer.from(token, 'base64').toString());
+    console.log('🔐 API DEBUG: Decoded mock data:', mockData);
     
-    return NextResponse.json({
+    const response = {
       valid: true,
       userId: mockData.userId || 'dev_user_123',
       externalId: mockData.externalId || 'dev_external_123', 
@@ -171,10 +187,15 @@ async function bypassForDevelopment(token: string) {
         email: mockData.email || 'dev@example.com',
         plan: mockData.plan || 'free'
       }
-    });
-  } catch {
+    };
+    
+    console.log('🔐 API DEBUG: Returning verification response:', response);
+    return NextResponse.json(response);
+  } catch (error) {
     // If token isn't valid base64 JSON, return default dev user
-    return NextResponse.json({
+    console.log('🔐 API DEBUG: Failed to decode token, using default dev user:', error);
+    
+    const defaultResponse = {
       valid: true,
       userId: 'dev_user_123',
       externalId: 'dev_external_123',
@@ -184,7 +205,10 @@ async function bypassForDevelopment(token: string) {
         email: 'dev@example.com',
         plan: 'free'
       }
-    });
+    };
+    
+    console.log('🔐 API DEBUG: Returning default response:', defaultResponse);
+    return NextResponse.json(defaultResponse);
   }
 }
 

@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { widgetAuth } from '@/lib/auth';
 
 export type SessionType = 'intro' | 'architect';
 
@@ -19,24 +18,55 @@ export interface SessionState {
   externalId: string;
 }
 
-export function useSession() {
+export function useSession(externalId?: string) {
+  console.log('🎯 DEBUG: useSession called with externalId:', externalId);
+  
   const [sessionState, setSessionState] = useState<SessionState>({
     sessionId: '',
     sessionType: 'architect',
     introBrief: null,
     externalId: ''
   });
+  
+  console.log('🎯 DEBUG: Current session state:', sessionState);
+  console.log('🎯 DEBUG: Received externalId:', externalId);
 
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    initializeSession();
-  }, []);
+    // 🐛 DEBUG: Track externalId changes
+    console.log('🎯 DEBUG: useSession externalId changed:', {
+      externalId,
+      hasExternalId: !!externalId,
+      currentSessionState: sessionState,
+      sessionStateExternalId: sessionState.externalId,
+      needsReinit: externalId && externalId !== sessionState.externalId
+    });
+    
+    // Initialize or re-initialize session if:
+    // 1. We have an externalId and no current session, OR
+    // 2. The externalId has changed from what's in the session state
+    if (externalId && (sessionState.externalId !== externalId || !sessionState.sessionId)) {
+      console.log('🎯 DEBUG: Initializing session with externalId:', externalId);
+      console.log('🎯 DEBUG: Reason:', {
+        hasExternalId: !!externalId,
+        currentExternalId: sessionState.externalId,
+        hasSessionId: !!sessionState.sessionId,
+        externalIdChanged: sessionState.externalId !== externalId
+      });
+      initializeSession();
+    } else if (!externalId) {
+      console.log('🎯 DEBUG: No externalId yet, waiting...');
+    } else {
+      console.log('🎯 DEBUG: Session already initialized with correct externalId');
+    }
+  }, [externalId, sessionState.externalId, sessionState.sessionId]);
 
   const initializeSession = async () => {
     try {
-      // Get external ID from auth
-      const externalId = widgetAuth?.getExternalId() || 'anonymous';
+      // Use the provided external ID (should not be undefined at this point)
+      const userExternalId = externalId!;
+      console.log('🎯 DEBUG: initializeSession called with externalId:', userExternalId);
       
       // Clear any old localStorage to force architect mode
       localStorage.removeItem('introSession');
@@ -50,33 +80,39 @@ export function useSession() {
       sessionType = 'architect';
       sessionId = generateSessionId('architect');
       
-      console.log('🔧 FORCING ARCHITECT MODE:', { sessionType, sessionId });
+      console.log('🔧 DEBUG: FORCING ARCHITECT MODE:', { sessionType, sessionId, userExternalId });
 
       // Skip all legacy intro logic - always architect
 
       // Store session ID
       localStorage.setItem('userSession', sessionId);
 
-      setSessionState({
+      const newSessionState = {
         sessionId,
         sessionType,
         introBrief,
-        externalId
-      });
+        externalId: userExternalId
+      };
+      
+      console.log('🎯 DEBUG: Setting session state:', newSessionState);
+      setSessionState(newSessionState);
 
       setIsLoading(false);
     } catch (error) {
-      console.error('Session initialization failed:', error);
+      console.error('🎯 DEBUG: Session initialization failed:', error);
       // Fallback to intro session
       const sessionId = generateSessionId('intro');
       localStorage.setItem('introSession', sessionId);
       
-      setSessionState({
+      const fallbackState = {
         sessionId,
-        sessionType: 'intro',
+        sessionType: 'intro' as SessionType,
         introBrief: null,
-        externalId: widgetAuth?.getExternalId() || 'anonymous'
-      });
+        externalId: externalId || 'anonymous'
+      };
+      
+      console.log('🎯 DEBUG: Setting fallback session state:', fallbackState);
+      setSessionState(fallbackState);
       
       setIsLoading(false);
     }
@@ -97,13 +133,7 @@ export function useSession() {
       introBrief: brief
     }));
 
-    // Notify parent of transition
-    widgetAuth?.sendToParent({
-      type: 'SESSION_TRANSITION',
-      from: 'intro',
-      to: 'architect',
-      brief
-    });
+    // Note: Parent notification moved to WidgetApp to maintain auth dependency
   };
 
   const startNewIntro = () => {
@@ -118,10 +148,7 @@ export function useSession() {
       introBrief: null
     }));
 
-    // Notify parent
-    widgetAuth?.sendToParent({
-      type: 'NEW_PROJECT_STARTED'
-    });
+    // Note: Parent notification moved to WidgetApp to maintain auth dependency
   };
 
   const startNewArchitectSession = () => {

@@ -5,6 +5,7 @@ import IntroChat from './IntroChat';
 import Chat from './chat';
 import DocumentViewer from './DocumentViewer/DocumentViewer';
 import { initializeWidgetAuth, widgetAuth, AuthVerificationResponse, ThemeConfig } from '@/lib/auth';
+import { useAuth, useExternalId, useAuthReady } from '@/lib/auth-store';
 import { useSession, SessionType, IntroBrief } from '@/hooks/useSession';
 import { WidgetTheme, chainCatalystTheme, applyTheme, parseThemeFromUrl } from '@/lib/theme';
 
@@ -16,27 +17,39 @@ interface WidgetAppProps {
 }
 
 export default function WidgetApp({ defaultSessionType = 'architect', skipIntro = true }: WidgetAppProps) {
-  const [isAuthenticating, setIsAuthenticating] = useState(true);
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [authResponse, setAuthResponse] = useState<AuthVerificationResponse | null>(null);
+  // Use auth store for reactive auth state management
+  const { isAuthenticating, authError, verificationResponse, widgetAuth: authWidgetAuth } = useAuth();
+  const externalId = useExternalId();
+  const isAuthReady = useAuthReady();
+  
   const [themeConfig, setThemeConfig] = useState<ThemeConfig | undefined>(undefined);
   const [widgetTheme, setWidgetTheme] = useState<WidgetTheme>(chainCatalystTheme);
   const [currentMode, setCurrentMode] = useState<WidgetMode>('chat');
   const [urlSessionId, setUrlSessionId] = useState<string | null>(null);
 
+  // Only initialize session after authentication is complete and we have the external ID
   const { 
     sessionState, 
     isLoading: isSessionLoading, 
     transitionToArchitect, 
     startNewIntro, 
     startNewArchitectSession 
-  } = useSession();
+  } = useSession(externalId);
 
   useEffect(() => {
+    // 🐛 DEBUG: Log widget initialization
+    console.log('📦 DEBUG: Widget initializing with URL:', window.location.href);
+    
     // Parse URL parameters for mode and session routing
     const urlParams = new URLSearchParams(window.location.search);
     const mode = urlParams.get('mode') as WidgetMode || 'chat';
     const sessionId = urlParams.get('sessionId');
+    
+    console.log('📦 DEBUG: Widget URL params:', {
+      mode,
+      sessionId,
+      allParams: Object.fromEntries(urlParams.entries())
+    });
     
     setCurrentMode(mode);
     setUrlSessionId(sessionId);
@@ -45,45 +58,29 @@ export default function WidgetApp({ defaultSessionType = 'architect', skipIntro 
     applyTheme(chainCatalystTheme);
     setWidgetTheme(chainCatalystTheme);
     
-    const authenticate = async () => {
-      try {
-        // Parse theme from URL, but always ensure we have a valid theme
-        const urlTheme = parseThemeFromUrl();
-        const activeTheme = urlTheme || chainCatalystTheme;
-        
-        console.log('🎨 Active theme selected:', { 
-          hasUrlTheme: !!urlTheme, 
-          primary: activeTheme.primary 
-        });
-        
-        setWidgetTheme(activeTheme);
-        applyTheme(activeTheme);
+    // Handle theme configuration from auth store
+    const handleThemeSetup = () => {
+      // Parse theme from URL, but always ensure we have a valid theme
+      const urlTheme = parseThemeFromUrl();
+      const activeTheme = urlTheme || chainCatalystTheme;
+      
+      console.log('🎨 Active theme selected:', { 
+        hasUrlTheme: !!urlTheme, 
+        primary: activeTheme.primary 
+      });
+      
+      setWidgetTheme(activeTheme);
+      applyTheme(activeTheme);
 
-        const response = await initializeWidgetAuth();
-        setAuthResponse(response);
-        
-        if (!response.valid) {
-          setAuthError(response.error || 'Authentication failed');
-          setIsAuthenticating(false);
-          return;
-        }
-
-        // Apply legacy theme config if available (for backward compatibility)
-        const legacyTheme = widgetAuth?.getTheme();
-        if (legacyTheme) {
-          setThemeConfig(legacyTheme);
-          applyGlobalTheme(legacyTheme);
-        }
-
-        setIsAuthenticating(false);
-      } catch (error) {
-        console.error('Authentication error:', error);
-        setAuthError(error instanceof Error ? error.message : 'Authentication failed');
-        setIsAuthenticating(false);
+      // Apply legacy theme config if available (for backward compatibility)
+      const legacyTheme = authWidgetAuth?.getTheme();
+      if (legacyTheme) {
+        setThemeConfig(legacyTheme);
+        applyGlobalTheme(legacyTheme);
       }
     };
 
-    authenticate();
+    handleThemeSetup();
   }, []);
 
   const applyGlobalTheme = (theme: ThemeConfig) => {
@@ -98,7 +95,16 @@ export default function WidgetApp({ defaultSessionType = 'architect', skipIntro 
     });
   };
 
-  if (isAuthenticating || isSessionLoading) {
+  // 🐛 DEBUG: Log loading state
+  console.log('🔄 DEBUG: Widget render state:', {
+    isAuthenticating,
+    isSessionLoading,
+    externalId,
+    isAuthReady,
+    shouldShowLoading: !isAuthReady || isSessionLoading
+  });
+  
+  if (!isAuthReady || isSessionLoading) {
     return (
       <div style={{background: 'var(--widget-background)'}} className="h-screen flex items-center justify-center">
         <div className="text-center">
@@ -110,6 +116,14 @@ export default function WidgetApp({ defaultSessionType = 'architect', skipIntro 
             </div>
           </div>
           <p className="text-white">Setting up your software architect...</p>
+          {/* 🐛 DEBUG: Show debug info in development */}
+          {process.env.NODE_ENV === 'development' && (
+            <div className="mt-4 text-xs text-gray-300">
+              Auth: {isAuthenticating ? 'authenticating' : 'done'} | 
+              Session: {isSessionLoading ? 'loading' : 'done'} | 
+              ExternalId: {externalId || 'waiting'}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -177,12 +191,32 @@ export default function WidgetApp({ defaultSessionType = 'architect', skipIntro 
     );
   }
 
+  // Enhanced transition and parent notification handlers
+  const handleTransitionToArchitect = (brief: IntroBrief) => {
+    transitionToArchitect(brief);
+    // Notify parent of transition
+    authWidgetAuth?.sendToParent({
+      type: 'SESSION_TRANSITION',
+      from: 'intro',
+      to: 'architect',
+      brief
+    });
+  };
+
+  const handleStartNewIntro = () => {
+    startNewIntro();
+    // Notify parent
+    authWidgetAuth?.sendToParent({
+      type: 'NEW_PROJECT_STARTED'
+    });
+  };
+
   // Default: Chat mode
   return (
     <Chat 
       introBrief={sessionState.introBrief}
-      onBackToIntro={startNewIntro}
-      onNewProject={startNewIntro}
+      onBackToIntro={handleStartNewIntro}
+      onNewProject={handleStartNewIntro}
       onViewDocuments={handleViewDocuments}
       themeConfig={themeConfig}
       widgetTheme={widgetTheme}
