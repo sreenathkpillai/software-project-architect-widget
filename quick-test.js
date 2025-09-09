@@ -3,7 +3,7 @@
  */
 
 async function quickTest() {
-  const BASE_URL = 'http://localhost:5000';
+  const BASE_URL = 'https://localhost:5000';
   
   console.log('Testing auth verification API...');
   

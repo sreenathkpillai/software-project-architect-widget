@@ -44,22 +44,22 @@ async function testSessionOwnership() {
     console.log('3. Testing API endpoints with correct ownership...');
     
     // Test incomplete sessions API
-    const incompleteUrl = `http://localhost:5000/api/sessions/incomplete?externalId=${testExternalId1}`;
+    const incompleteUrl = `https://localhost:5000/api/sessions/incomplete?externalId=${testExternalId1}`;
     console.log(`   - Testing: ${incompleteUrl}`);
     
     // Test completed sessions API
-    const completedUrl = `http://localhost:5000/api/sessions/completed?externalId=${testExternalId1}`;
+    const completedUrl = `https://localhost:5000/api/sessions/completed?externalId=${testExternalId1}`;
     console.log(`   - Testing: ${completedUrl}`);
     
     // Test documents API with correct ownership
-    const documentsUrl = `http://localhost:5000/api/sessions/${testSessionId}/documents?externalId=${testExternalId1}`;
+    const documentsUrl = `https://localhost:5000/api/sessions/${testSessionId}/documents?externalId=${testExternalId1}`;
     console.log(`   - Testing: ${documentsUrl}`);
     
     // 4. Test API endpoints with wrong ownership
     console.log('4. Testing API endpoints with wrong ownership (should fail)...');
     
     // Test documents API with wrong externalId
-    const wrongOwnerUrl = `http://localhost:5000/api/sessions/${testSessionId}/documents?externalId=${testExternalId2}`;
+    const wrongOwnerUrl = `https://localhost:5000/api/sessions/${testSessionId}/documents?externalId=${testExternalId2}`;
     console.log(`   - Testing: ${wrongOwnerUrl} (should return 404)`);
 
     // 5. Test database queries with ownership filtering

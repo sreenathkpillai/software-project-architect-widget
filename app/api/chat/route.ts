@@ -584,7 +584,7 @@ async function handleOpenAIRequest(messages: any[], contextualPrompt: string, us
           const completionMessage = "🎉 All project documents are complete! Your full software architecture specification is ready.";
           
           // Call the completion API to mark session as complete
-          const completionResponse = await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:5000'}/api/sessions/${userSession}/complete`, {
+          const completionResponse = await fetch(`${process.env.NEXTAUTH_URL || 'https://localhost:5000'}/api/sessions/${userSession}/complete`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
