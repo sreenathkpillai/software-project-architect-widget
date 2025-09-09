@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { getApiUrl } from '@/lib/api-config';
 
 interface IntroQuestion {
   id: number;
@@ -150,7 +151,7 @@ export default function IntroChat({ onComplete, themeConfig }: IntroChatProps) {
       const isFirstMessage = currentQuestionIndex === 0;
 
       // Call the intro chat API for intelligent response
-      const response = await fetch('/api/intro-chat', {
+      const response = await fetch(getApiUrl('intro-chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -244,7 +245,7 @@ export default function IntroChat({ onComplete, themeConfig }: IntroChatProps) {
       // Generate a session ID for this intro if we don't have one
       const sessionId = `intro_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       
-      await fetch('/api/intro-brief', {
+      await fetch(getApiUrl('intro-brief'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

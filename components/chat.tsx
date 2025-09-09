@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { widgetAuth, ThemeConfig } from '@/lib/auth';
 import { WidgetTheme } from '@/lib/theme';
+import { getApiUrl } from '@/lib/api-config';
 import SaveSessionModal from './SaveSessionModal';
 
 interface Message {
@@ -156,7 +157,7 @@ export default function Chat({
     setLoadingText(getRandomLoadingText());
 
     try {
-      const response = await fetch('/api/chat', {
+      const response = await fetch(getApiUrl('chat'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -255,7 +256,7 @@ export default function Chat({
     setIsSavingSession(true);
     
     try {
-      const response = await fetch('/api/sessions', {
+      const response = await fetch(getApiUrl('sessions'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
