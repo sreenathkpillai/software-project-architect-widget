@@ -216,7 +216,7 @@ export default function Chat({
   const fetchProgress = async () => {
     if (!userSession) return;
     try {
-      const response = await fetch(`/api/progress?userSession=${userSession}`);
+      const response = await fetch(`${getApiUrl('progress')}?userSession=${userSession}`);
       if (response.ok) {
         const data = await response.json();
         setCompletedDocs(data.completedDocs || []);
