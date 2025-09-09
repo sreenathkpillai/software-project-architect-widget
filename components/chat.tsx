@@ -235,7 +235,7 @@ export default function Chat({
 
   const loadSavedSessions = async (extId: string) => {
     try {
-      const response = await fetch(`/api/sessions?externalId=${extId}`);
+      const response = await fetch(`${getApiUrl('sessions')}?externalId=${extId}`);
       if (response.ok) {
         const data = await response.json();
         setSavedSessions(data.sessions || []);
@@ -289,7 +289,7 @@ export default function Chat({
     setIsLoadingSession(true);
     
     try {
-      const response = await fetch(`/api/sessions/${sessionId}/load?externalId=${externalId}`);
+      const response = await fetch(`${getApiUrl(`sessions/${sessionId}/load`)}?externalId=${externalId}`);
       
       if (response.ok) {
         const data = await response.json();

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Document, DocumentViewerProps } from './types';
+import { getApiUrl } from '@/lib/api-config';
 import DocumentSidebar from './DocumentSidebar';
 import DocumentContent from './DocumentContent';
 import DocumentExport from './DocumentExport';
@@ -19,7 +20,7 @@ export default function DocumentViewer({ sessionId, externalId, sessionName = 'P
   const fetchDocuments = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/sessions/${sessionId}/documents?externalId=${externalId}`);
+      const response = await fetch(`${getApiUrl(`sessions/${sessionId}/documents`)}?externalId=${externalId}`);
       
       if (!response.ok) {
         throw new Error('Failed to fetch documents');
