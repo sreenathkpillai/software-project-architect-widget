@@ -34,6 +34,11 @@ export class WidgetAuth {
    * Extract auth config from URL parameters or iframe context
    */
   static extractAuthFromParams(): AuthConfig {
+    if (typeof window === 'undefined') {
+      console.log('🔍 DEBUG: Server-side rendering, no URL params available');
+      return {};
+    }
+    
     const urlParams = new URLSearchParams(window.location.search);
     
     // 🐛 DEBUG: Log all URL parameters
@@ -42,18 +47,18 @@ export class WidgetAuth {
     console.log('🔍 DEBUG: URL Hash:', window.location.hash);
     console.log('🔍 DEBUG: All URL Params:');
     const allParams: Record<string, string> = {};
-    for (const [key, value] of urlParams.entries()) {
+    urlParams.forEach((value, key) => {
       allParams[key] = value;
       console.log(`  ${key}: "${value}"`);
-    }
+    });
     
     // Also check for hash-based parameters (sometimes used by SPAs)
     if (window.location.hash.includes('=')) {
       console.log('🔍 DEBUG: Found hash-based params, parsing...');
       const hashParams = new URLSearchParams(window.location.hash.substring(1));
-      for (const [key, value] of hashParams.entries()) {
+      hashParams.forEach((value, key) => {
         console.log(`  hash-${key}: "${value}"`);
-      }
+      });
     }
     
     let externalId = urlParams.get('externalId') || undefined;
@@ -317,6 +322,13 @@ export class WidgetAuth {
    */
   getExternalId(): string | undefined {
     return this.config.externalId;
+  }
+
+  /**
+   * Update auth configuration
+   */
+  updateAuthConfig(updates: Partial<AuthConfig>): void {
+    this.config = { ...this.config, ...updates };
   }
 
   /**

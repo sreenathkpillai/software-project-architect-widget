@@ -84,8 +84,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
         // Update the widget auth config if available
         setAuthState(prev => {
           if (prev.widgetAuth) {
-            prev.widgetAuth.config.token = event.data.token;
-            prev.widgetAuth.config.externalId = event.data.externalId;
+            prev.widgetAuth.updateAuthConfig({
+              token: event.data.token,
+              externalId: event.data.externalId
+            });
             
             // Optionally re-verify with new token
             if (event.data.token) {

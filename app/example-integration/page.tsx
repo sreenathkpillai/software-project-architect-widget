@@ -18,7 +18,7 @@ export default function ExampleIntegration() {
   };
 
   const generateWidgetUrl = () => {
-    const baseUrl = window.location.origin;
+    const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
     const params = new URLSearchParams({
       token: 'demo_jwt_token_here',
       externalId: 'demo_user_123',
