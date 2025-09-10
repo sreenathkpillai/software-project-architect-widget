@@ -151,8 +151,8 @@
 
     <script>
         // Widget base URL - change this to your actual widget URL
-        const WIDGET_BASE_URL = 'https://localhost:3000';
-        const API_BASE_URL = 'https://localhost:3000/api';
+        const WIDGET_BASE_URL = 'https://localhost:5000/widget';
+        const API_BASE_URL = WIDGET_BASE_URL + '/api';
         
         function updateStatus(message) {
             document.getElementById('status').textContent = message;
@@ -245,7 +245,7 @@
         
         function handleWidgetMessage(event) {
             // Verify origin for security (allow localhost for development)
-            const allowedOrigins = [WIDGET_BASE_URL, 'https://localhost:3000'];
+            const allowedOrigins = [WIDGET_BASE_URL, 'https://localhost:5000'];
             if (!allowedOrigins.includes(event.origin)) {
                 console.log('📦 PARENT: Ignoring message from unknown origin:', event.origin);
                 return;

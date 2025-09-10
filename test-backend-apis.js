@@ -5,7 +5,7 @@
  * Run with: node test-backend-apis.js
  */
 
-const BASE_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://localhost:5000';
+const BASE_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://localhost:5000/widget';
 
 async function testAPI(endpoint, options = {}) {
   try {
