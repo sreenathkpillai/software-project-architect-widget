@@ -11,11 +11,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'externalId required' }, { status: 400 });
     }
 
-    // Get all incomplete sessions for this external ID
+    // Get all incomplete sessions for this external ID (exclude discarded ones)
     const incompleteSessions = await prisma.savedSession.findMany({
       where: {
         externalId,
-        isComplete: false
+        isComplete: false,
+        isDiscarded: false
       },
       orderBy: {
         lastActivity: 'desc'

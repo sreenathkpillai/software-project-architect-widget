@@ -19,9 +19,12 @@ export async function GET(
       return NextResponse.json({ error: 'sessionId required' }, { status: 400 });
     }
 
-    // Get session data including messages
+    // Get session data including messages (exclude discarded sessions)
     const sessionData = await prisma.savedSession.findUnique({
-      where: { userSession: sessionId },
+      where: { 
+        userSession: sessionId,
+        isDiscarded: false
+      },
       include: {
         messages: {
           orderBy: { order: 'asc' }

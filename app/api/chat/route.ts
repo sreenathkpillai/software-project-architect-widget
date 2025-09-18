@@ -860,6 +860,23 @@ async function saveSpecificationDocument(
   console.log(`📏 Content length: ${content.length} characters`);
   
   try {
+    // Ensure session exists before saving document
+    if (userSession && externalId) {
+      await prisma.savedSession.upsert({
+        where: { userSession },
+        update: { lastActivity: new Date() },
+        create: {
+          userSession,
+          externalId,
+          sessionName: `Draft ${new Date().toLocaleDateString()}`,
+          sessionType: 'architect',
+          isComplete: false,
+          lastActivity: new Date()
+        }
+      });
+      console.log(`✅ Session ensured before document save: ${userSession}`);
+    }
+
     // Map document_type to Prisma enum
     // No mapping needed - direct match between tool and database enum
     const documentTypeMap: Record<string, any> = {

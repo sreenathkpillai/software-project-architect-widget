@@ -8,97 +8,225 @@ datasource db {
 }
 
 model IntroBrief {
-  id                String   @id @default(cuid())
-  userSession       String   @unique @map("user_session")
-  externalId        String   @map("external_id")
-  whatTheyreDoing   String?  @map("what_theyre_doing")
-  projectType       String?  @map("project_type")
-  audience          String?
-  problem           String?
-  timeline          String?
-  teamSize          String?  @map("team_size")
-  currentQuestion   Int      @default(0) @map("current_question")
-  isComplete        Boolean  @default(false) @map("is_complete")
-  projectBrief      String?  @map("project_brief")
-  createdAt         DateTime @default(now()) @map("created_at")
-  updatedAt         DateTime @updatedAt @map("updated_at")
+  id              String   @id @default(cuid())
+  userSession     String   @unique @map("user_session")
+  externalId      String   @map("external_id")
+  whatTheyreDoing String?  @map("what_theyre_doing")
+  projectType     String?  @map("project_type")
+  audience        String?
+  problem         String?
+  timeline        String?
+  teamSize        String?  @map("team_size")
+  currentQuestion Int      @default(0) @map("current_question")
+  isComplete      Boolean  @default(false) @map("is_complete")
+  projectBrief    String?  @map("project_brief")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
   @@map("intro_briefs")
 }
 
 model QuestionCount {
-  id              String   @id @default(cuid())
-  userSession     String   @map("user_session")
-  documentType    String   @map("document_type")
-  questionsAsked  Int      @default(0) @map("questions_asked")
-  externalId      String   @default("sreeveTest123") @map("external_id")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  id             String   @id @default(cuid())
+  userSession    String   @map("user_session")
+  documentType   String   @map("document_type")
+  questionsAsked Int      @default(0) @map("questions_asked")
+  externalId     String   @default("sreeveTest123") @map("external_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
 
   @@unique([userSession, documentType])
   @@map("question_counts")
 }
 
 model SavedSession {
-  id                String    @id @default(cuid())
-  userSession       String    @unique @map("user_session")
-  externalId        String    @map("external_id")
-  sessionName       String    @map("session_name")
-  sessionType       String    @default("architect") @map("session_type")
-  isComplete        Boolean   @default(false) @map("is_complete")
-  completedAt       DateTime? @map("completed_at")
-  completionMessage String?   @map("completion_message")
-  lastActivity      DateTime  @default(now()) @map("last_activity")
-  createdAt         DateTime  @default(now()) @map("created_at")
-  
+  id                String        @id @default(cuid())
+  userSession       String        @unique @map("user_session")
+  externalId        String        @map("external_id")
+  sessionName       String        @map("session_name")
+  sessionType       String        @default("architect") @map("session_type")
+  isComplete        Boolean       @default(false) @map("is_complete")
+  completedAt       DateTime?     @map("completed_at")
+  completionMessage String?       @map("completion_message")
+  isDiscarded       Boolean       @default(false) @map("is_discarded")
+  discardedAt       DateTime?     @map("discarded_at")
+  lastActivity      DateTime      @default(now()) @map("last_activity")
+  createdAt         DateTime      @default(now()) @map("created_at")
   messages          ChatMessage[]
 
-  @@index([externalId, isComplete])
+  @@index([externalId, isComplete, isDiscarded])
   @@map("saved_sessions")
 }
 
 model ChatMessage {
-  id          String   @id @default(cuid())
-  sessionId   String   @map("session_id")
-  role        String   // 'user' or 'assistant'
-  content     String
-  timestamp   DateTime @default(now())
-  order       Int      // Message order in conversation
-  
-  session     SavedSession @relation(fields: [sessionId], references: [userSession])
-  
+  id        String       @id @default(cuid())
+  sessionId String       @map("session_id")
+  role      String
+  content   String
+  timestamp DateTime     @default(now())
+  order     Int
+  session   SavedSession @relation(fields: [sessionId], references: [userSession])
+
   @@index([sessionId, order])
   @@map("chat_messages")
 }
 
 model Specification {
-  id                    String             @id @default(cuid())
-  filename              String
-  content               String
-  documentType          specification_type @map("document_type")
-  description           String
-  nextSteps             String?            @map("next_steps")
-  skipTechnicalSummary  Boolean            @default(false) @map("skip_technical_summary")
-  userSession           String             @map("user_session")
-  createdAt             DateTime           @default(now()) @map("created_at")
-  updatedAt             DateTime           @updatedAt @map("updated_at")
-  externalId            String             @default("sreeveTest123") @map("external_id")
-  order                 Int                @default(0)
+  id                   String             @id @default(cuid())
+  filename             String
+  content              String
+  documentType         specification_type @map("document_type")
+  description          String
+  nextSteps            String?            @map("next_steps")
+  skipTechnicalSummary Boolean            @default(false) @map("skip_technical_summary")
+  userSession          String             @map("user_session")
+  createdAt            DateTime           @default(now()) @map("created_at")
+  updatedAt            DateTime           @updatedAt @map("updated_at")
+  externalId           String             @default("sreeveTest123") @map("external_id")
+  order                Int                @default(0)
 
   @@index([userSession, documentType])
   @@map("specifications")
 }
 
 model ToolUsage {
-  id           String   @id @default(cuid())
-  externalId   String   @map("external_id")
-  usageType    String   @map("usage_type")
-  userSession  String   @map("user_session")
-  createdAt    DateTime @default(now()) @map("created_at")
-  month        Int
+  id          String   @id @default(cuid())
+  externalId  String   @map("external_id")
+  usageType   String   @map("usage_type")
+  userSession String   @map("user_session")
+  createdAt   DateTime @default(now()) @map("created_at")
+  month       Int
 
   @@index([externalId, month])
   @@map("tool_usage")
+}
+
+model analysis_sessions {
+  id                    String                  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  project_path          String
+  session_type          String                  @db.VarChar(50)
+  created_at            DateTime                @default(now()) @db.Timestamp(6)
+  updated_at            DateTime                @default(now()) @db.Timestamp(6)
+  metadata              Json?
+  status                String?                 @default("active") @db.VarChar(20)
+  document_analyses     document_analyses[]
+  file_analyses         file_analyses[]
+  prompt_generations    prompt_generations[]
+  recreatable_artifacts recreatable_artifacts[]
+
+  @@index([project_path], map: "idx_sessions_project")
+  @@index([status], map: "idx_sessions_status")
+}
+
+model document_analyses {
+  id                String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  session_id        String            @db.Uuid
+  document_path     String
+  document_type     String?           @db.VarChar(50)
+  title             String?
+  complexity_score  Decimal?          @db.Decimal(3, 2)
+  requirements      Json?
+  architecture      Json?
+  analysis_result   Json?
+  created_at        DateTime?         @default(now()) @db.Timestamp(6)
+  analysis_sessions analysis_sessions @relation(fields: [session_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([session_id], map: "idx_docs_session")
+}
+
+model file_analyses {
+  id                String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  session_id        String            @db.Uuid
+  file_path         String
+  relative_path     String?
+  file_hash         String?           @db.VarChar(64)
+  language          String?           @db.VarChar(50)
+  purpose           String?           @db.VarChar(50)
+  relevance         String?           @db.VarChar(20)
+  framework         String?           @db.VarChar(100)
+  confidence        Decimal?          @db.Decimal(3, 2)
+  key_concepts      String[]
+  dependencies      String[]
+  summary           String?
+  raw_analysis      String?
+  created_at        DateTime?         @default(now()) @db.Timestamp(6)
+  analysis_sessions analysis_sessions @relation(fields: [session_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([session_id, file_path])
+  @@index([session_id], map: "idx_files_session")
+}
+
+model mcp_agent_sessions {
+  id                  String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  conversation_id     String            @db.Uuid
+  agent_id            String            @db.VarChar(100)
+  session_data        Json?             @default("{}")
+  message_count       Int?              @default(0)
+  last_activity       DateTime?         @default(now()) @db.Timestamp(6)
+  performance_metrics Json?             @default("{}")
+  mcp_conversations   mcp_conversations @relation(fields: [conversation_id], references: [session_id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([conversation_id, agent_id])
+  @@index([conversation_id], map: "idx_agent_sessions_conversation")
+}
+
+model mcp_conversations {
+  session_id          String                @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  client_id           String                @db.VarChar(255)
+  agent_id            String                @db.VarChar(100)
+  messages            Json?                 @default("[]")
+  context             Json?                 @default("{}")
+  created_at          DateTime?             @default(now()) @db.Timestamp(6)
+  updated_at          DateTime?             @default(now()) @db.Timestamp(6)
+  status              String?               @default("active") @db.VarChar(20)
+  mcp_agent_sessions  mcp_agent_sessions[]
+  mcp_message_history mcp_message_history[]
+
+  @@index([client_id], map: "idx_conversations_client")
+  @@index([status], map: "idx_conversations_status")
+}
+
+model mcp_message_history {
+  id                 String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  conversation_id    String            @db.Uuid
+  message_id         String            @db.VarChar(255)
+  agent_id           String            @db.VarChar(100)
+  message_type       String            @db.VarChar(50)
+  payload            Json
+  response_data      Json?
+  processing_time_ms Int?
+  success            Boolean?
+  error_message      String?
+  timestamp          DateTime?         @default(now()) @db.Timestamp(6)
+  mcp_conversations  mcp_conversations @relation(fields: [conversation_id], references: [session_id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([conversation_id], map: "idx_message_history_conversation")
+  @@index([timestamp], map: "idx_message_history_timestamp")
+}
+
+model prompt_generations {
+  id                String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  session_id        String            @db.Uuid
+  prompt_type       String?           @db.VarChar(50)
+  context_data      Json?
+  generated_content String?
+  metadata          Json?
+  created_at        DateTime?         @default(now()) @db.Timestamp(6)
+  analysis_sessions analysis_sessions @relation(fields: [session_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model recreatable_artifacts {
+  id                String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  session_id        String            @db.Uuid
+  artifact_type     String            @db.VarChar(50)
+  file_path         String
+  content           String?
+  dependencies      String[]
+  created_at        DateTime?         @default(now()) @db.Timestamp(6)
+  analysis_sessions analysis_sessions @relation(fields: [session_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([session_id, artifact_type, file_path])
+  @@index([session_id], map: "idx_artifacts_session")
 }
 
 enum specification_type {

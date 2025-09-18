@@ -62,6 +62,7 @@ export default function Chat({
   const [isSavingSession, setIsSavingSession] = useState(false);
   const [isLoadingSession, setIsLoadingSession] = useState(false);
   const [loadSuccessMessage, setLoadSuccessMessage] = useState<string | null>(null);
+  const [currentSessionId, setCurrentSessionId] = useState<string>('');
 
   // Initialize external ID and session on component mount
   useEffect(() => {
@@ -77,10 +78,152 @@ export default function Chat({
     const sessionId = propUserSession || localStorage.getItem('userSession') || 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     localStorage.setItem('userSession', sessionId);
     setUserSession(sessionId);
+    setCurrentSessionId(sessionId);
     
     // Load saved sessions for this external ID
     loadSavedSessions(extId);
+    
+    // Check if session exists in DB and load state
+    if (sessionId) {
+      loadSessionState(sessionId, extId);
+    }
   }, []);
+
+  // Auto-load session from props when provided
+  useEffect(() => {
+    if (propUserSession && propUserSession !== userSession && externalId) {
+      setCurrentSessionId(propUserSession);
+      loadSessionData(propUserSession);
+    }
+  }, [propUserSession, externalId]);
+
+  const loadSessionData = async (sessionId: string) => {
+    // Load session data without changing dropdown selection
+    try {
+      const response = await fetch(
+        `${getApiUrl('sessions')}?userSession=${sessionId}&externalId=${externalId}`
+      );
+      
+      if (response.ok) {
+        const data = await response.json();
+        setMessages(data.messages || []);
+        setCompletedDocs(data.completedDocs || []);
+        setUserSession(sessionId);
+        localStorage.setItem('userSession', sessionId);
+        setCurrentSessionId(sessionId);
+        console.log(`✅ Auto-loaded session: ${sessionId}`);
+      }
+    } catch (error) {
+      console.error('Failed to auto-load session:', error);
+    }
+  };
+
+  const loadSessionState = async (sessionId: string, extId: string) => {
+    try {
+      const response = await fetch(`${getApiUrl('sessions')}?userSession=${sessionId}&externalId=${extId}`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.messages && data.messages.length > 0) {
+          setMessages(data.messages);
+          setCompletedDocs(data.completedDocs || []);
+          console.log(`✅ Session state restored: ${sessionId} (${data.messages.length} messages)`);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load session state:', error);
+    }
+  };
+
+  const saveSessionState = async () => {
+    if (!userSession || !externalId || messages.length === 0) return;
+    
+    try {
+      const response = await fetch(getApiUrl('sessions'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          userSession, 
+          externalId, 
+          sessionName: `Draft ${new Date().toLocaleDateString()}`,
+          messages: messages,
+          action: 'save'
+        })
+      });
+      
+      if (response.ok) {
+        console.log('✅ Session state saved on error');
+      }
+    } catch (error) {
+      console.error('Failed to save session state:', error);
+    }
+  };
+
+  const discardCurrentSession = async () => {
+    if (!userSession || !externalId) return false;
+
+    try {
+      const response = await fetch(`${getApiUrl(`sessions/${userSession}/discard`)}?externalId=${externalId}`, {
+        method: 'DELETE'
+      });
+      
+      if (response.ok) {
+        console.log('✅ Current session discarded successfully');
+        // Reload saved sessions to update dropdown
+        loadSavedSessions(externalId);
+        return true;
+      } else {
+        const errorData = await response.json();
+        console.error('Failed to discard session:', errorData);
+        return false;
+      }
+    } catch (error) {
+      console.error('Error discarding session:', error);
+      return false;
+    }
+  };
+
+  const isAutoSavedSession = (sessionName: string) => {
+    return sessionName.startsWith('Draft ');
+  };
+
+  const hasMessages = () => {
+    return messages.length > 0;
+  };
+
+  const startOver = async () => {
+    if (!userSession || !externalId) {
+      // If no session, just reset
+      resetSession();
+      return;
+    }
+
+    // Get current session info
+    const currentSession = savedSessions.find(s => s.userSession === userSession);
+    const sessionName = currentSession?.sessionName || `Draft ${new Date().toLocaleDateString()}`;
+    
+    if (hasMessages()) {
+      if (isAutoSavedSession(sessionName)) {
+        // Auto-saved session (starts with "Draft") - discard it
+        const discarded = await discardCurrentSession();
+        if (discarded) {
+          console.log('🗑️ Auto-saved session discarded');
+        }
+      } else {
+        // User-saved session (custom name) - show confirmation
+        const confirmed = window.confirm(
+          `You have a saved session "${sessionName}" with ${messages.length} messages. ` +
+          'Starting over will keep this session but create a new one. Do you want to continue?'
+        );
+        
+        if (!confirmed) {
+          return; // User cancelled
+        }
+      }
+    }
+
+    // Reset to new session
+    resetSession();
+  };
 
   const resetSession = () => {
     // Clear current conversation and generate new session
@@ -89,6 +232,7 @@ export default function Chat({
     const newSessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     localStorage.setItem('userSession', newSessionId);
     setUserSession(newSessionId);
+    setCurrentSessionId(newSessionId);
   };
 
   const getRandomLoadingText = () => {
@@ -145,9 +289,59 @@ export default function Chat({
     return phrases[Math.floor(Math.random() * phrases.length)];
   };
 
+  const ensureSessionExists = async () => {
+    try {
+      const response = await fetch(getApiUrl('sessions/ensure'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userSession,
+          externalId,
+          sessionType,
+          introBrief
+        })
+      });
+
+      if (!response.ok) {
+        console.error('Failed to ensure session exists');
+      } else {
+        console.log('✅ Session ensured in database');
+      }
+    } catch (error) {
+      console.error('Error ensuring session exists:', error);
+    }
+  };
+
+  const saveMessagePair = async (userMsg: Message, assistantMsg: Message) => {
+    try {
+      const response = await fetch(getApiUrl('sessions/messages'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userSession,
+          externalId,
+          messages: [userMsg, assistantMsg]
+        })
+      });
+
+      if (!response.ok) {
+        console.error('Failed to save message pair');
+      } else {
+        console.log('✅ Message pair saved to database');
+      }
+    } catch (error) {
+      console.error('Error saving message pair:', error);
+    }
+  };
+
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
+
+    // Before sending first message, ensure session exists in DB
+    if (messages.length === 0) {
+      await ensureSessionExists();
+    }
 
     const userMessage: Message = { role: 'user', content: input };
     const newMessages = [...messages, userMessage];
@@ -177,7 +371,11 @@ export default function Chat({
       const data = await response.json();
       
       if (response.ok) {
-        setMessages([...newMessages, { role: 'assistant', content: data.text }]);
+        const assistantMessage: Message = { role: 'assistant', content: data.text };
+        setMessages([...newMessages, assistantMessage]);
+        
+        // Save message pair after receiving response
+        await saveMessagePair(userMessage, assistantMessage);
         
         // Check if session is complete
         if (data.sessionComplete) {
@@ -204,10 +402,13 @@ export default function Chat({
         }]);
       }
     } catch (error) {
+      console.error('Message send failed:', error);
       setMessages([...newMessages, { 
         role: 'assistant', 
         content: 'Sorry, there was an error connecting to the server.' 
       }]);
+      // Save current state to session on error
+      await saveSessionState();
     } finally {
       setIsLoading(false);
     }
@@ -256,25 +457,24 @@ export default function Chat({
     setIsSavingSession(true);
     
     try {
+      // Use PUT method to rename existing session instead of creating new one
       const response = await fetch(getApiUrl('sessions'), {
-        method: 'POST',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          userSession, 
-          externalId, 
-          sessionName,
-          messages: messages, // Include chat history
-          action: 'save'
+          userSession,
+          sessionName, // This will replace "Draft" name
+          action: 'rename'
         })
       });
       
       if (response.ok) {
         loadSavedSessions(externalId);
         setShowSaveModal(false);
-        // Could show a toast notification here instead of alert
+        console.log(`✅ Session renamed to: ${sessionName}`);
       } else {
         const errorData = await response.json();
-        console.error('Failed to save session:', errorData);
+        console.error('Failed to rename session:', errorData);
       }
     } catch (error) {
       console.error('Failed to save session:', error);
@@ -304,6 +504,7 @@ export default function Chat({
         setCompletedDocs(data.completedDocs || []);
         setUserSession(sessionId);
         localStorage.setItem('userSession', sessionId);
+        setCurrentSessionId(sessionId);
         
         // Scroll to bottom after loading messages
         setTimeout(() => {
@@ -337,12 +538,6 @@ export default function Chat({
     }
   };
 
-  const startOver = () => {
-    // Reset current session without counting as tool call
-    setMessages([]);
-    setCompletedDocs([]);
-    setInput('');
-  };
 
   const documentSteps = [
     { key: 'prd', label: 'Product Requirements' },
@@ -429,7 +624,7 @@ Now let's dive deep into the technical architecture. I'll focus on the technical
                   onClick={onNewProject}
                   style={{color: 'var(--widget-status-success)'}} className="text-sm hover:opacity-80 flex items-center gap-2 ml-auto"
                 >
-                  New Project →
+                  Start Over →
                 </button>
               )}
             </div>
@@ -510,18 +705,23 @@ Now let's dive deep into the technical architecture. I'll focus on the technical
               Saved Sessions
             </label>
             <select
-              key={`sessions-${savedSessions.length}-${isLoadingSession}`}
-              onChange={(e) => e.target.value && loadSession(e.target.value)}
+              key={`sessions-${savedSessions.length}-${isLoadingSession}-${currentSessionId}`}
+              value={currentSessionId}
+              onChange={(e) => {
+                if (e.target.value && e.target.value !== currentSessionId) {
+                  loadSession(e.target.value);
+                }
+              }}
               className="widget-input w-full p-2 text-sm"
               disabled={isLoading || isLoadingSession}
-              defaultValue=""
             >
               <option value="">
-                {isLoadingSession ? 'Loading session...' : 'Load a saved session...'}
+                {isLoadingSession ? 'Loading session...' : 'Load a different session...'}
               </option>
               {savedSessions.map((session) => (
                 <option key={session.userSession} value={session.userSession}>
                   {session.sessionName}
+                  {session.userSession === currentSessionId ? ' (current)' : ''}
                 </option>
               ))}
             </select>
@@ -557,7 +757,7 @@ Now let's dive deep into the technical architecture. I'll focus on the technical
           </button>
           
           <button
-            onClick={resetSession}
+            onClick={startOver}
             style={{
               background: 'transparent',
               border: '1px solid rgba(255, 255, 255, 0.3)',
@@ -568,7 +768,7 @@ Now let's dive deep into the technical architecture. I'll focus on the technical
             className="w-full px-4 py-2 hover:bg-white hover:bg-opacity-10 transition-all font-medium"
             disabled={isLoading}
           >
-            New Project
+            Start Over
           </button>
         </div>
       </div>
@@ -740,7 +940,7 @@ Now let's dive deep into the technical architecture. I'll focus on the technical
         onClose={() => !isSavingSession && setShowSaveModal(false)}
         onSave={saveSession}
         isLoading={isSavingSession}
-        defaultName={`Session ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`}
+        defaultName={`Draft ${new Date().toLocaleDateString()}`}
       />
     </div>
   );

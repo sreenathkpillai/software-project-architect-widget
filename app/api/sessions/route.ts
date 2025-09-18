@@ -13,9 +13,12 @@ export async function GET(request: NextRequest) {
     }
 
     if (userSession) {
-      // Get specific session data including messages
+      // Get specific session data including messages (exclude discarded sessions)
       const sessionData = await prisma.savedSession.findUnique({
-        where: { userSession },
+        where: { 
+          userSession,
+          isDiscarded: false
+        },
         include: {
           messages: {
             orderBy: { order: 'asc' }
@@ -48,11 +51,12 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Get all saved sessions for external ID (excluding completed ones)
+    // Get all saved sessions for external ID (excluding completed and discarded ones)
     const sessions = await prisma.savedSession.findMany({
       where: { 
         externalId,
-        isComplete: false
+        isComplete: false,
+        isDiscarded: false
       },
       orderBy: { lastActivity: 'desc' }
     });
@@ -63,6 +67,46 @@ export async function GET(request: NextRequest) {
     console.error('Sessions API error:', error);
     return NextResponse.json(
       { error: 'Failed to process session request' }, 
+      { status: 500 }
+    );
+  }
+}
+
+export async function PUT(request: NextRequest) {
+  try {
+    const { userSession, sessionName, action } = await request.json();
+
+    if (!userSession) {
+      return NextResponse.json({ error: 'userSession required' }, { status: 400 });
+    }
+
+    if (action === 'rename') {
+      // Only allow renaming non-discarded sessions
+      const session = await prisma.savedSession.findUnique({
+        where: { userSession }
+      });
+
+      if (!session || session.isDiscarded) {
+        return NextResponse.json({ error: 'Session not found or discarded' }, { status: 404 });
+      }
+
+      await prisma.savedSession.update({
+        where: { userSession },
+        data: { 
+          sessionName,
+          lastActivity: new Date()
+        }
+      });
+      
+      return NextResponse.json({ success: true });
+    }
+
+    return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
+
+  } catch (error) {
+    console.error('Sessions PUT API error:', error);
+    return NextResponse.json(
+      { error: 'Failed to update session' }, 
       { status: 500 }
     );
   }

@@ -17,11 +17,12 @@ export async function POST(
       }, { status: 400 });
     }
 
-    // Verify session ownership and update completion status
+    // Verify session ownership and update completion status (only for non-discarded sessions)
     const updatedSession = await prisma.savedSession.updateMany({
       where: {
         userSession: sessionId,
-        externalId: externalId
+        externalId: externalId,
+        isDiscarded: false
       },
       data: {
         isComplete: true,
