@@ -44,7 +44,7 @@ model SavedSession {
   userSession       String        @unique @map("user_session")
   externalId        String        @map("external_id")
   sessionName       String        @map("session_name")
-  sessionType       String        @default("architect") @map("session_type")
+  sessionType       String        @default("architect") @map("session_type") // architect, intro, workflow
   isComplete        Boolean       @default(false) @map("is_complete")
   completedAt       DateTime?     @map("completed_at")
   completionMessage String?       @map("completion_message")
@@ -243,4 +243,91 @@ enum specification_type {
   user_flow
   third_party_libraries
   readme
+}
+
+// Workflow Models
+
+model WorkflowProject {
+  id                 String   @id @default(cuid())
+  externalId         String   @map("external_id")
+  name               String
+  description        String?
+  repositoryUrl      String?  @map("repository_url")
+  repositoryType     String?  @map("repository_type") // github, gitlab, bitbucket, azure
+  architectSessionId String?  @map("architect_session_id") // Link to Architect session
+  workingDoc         String?  @map("working_doc") @db.Text // General working documentation
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  stories            UserStory[]
+  promptPacks        PromptPack[]
+  implementations    Implementation[]
+
+  @@index([externalId])
+  @@map("workflow_projects")
+}
+
+model UserStory {
+  id                 String   @id @default(cuid())
+  projectId          String   @map("project_id")
+  title              String
+  userStatement      String   @map("user_statement") // As a [role], I want [goal], so that [benefit]
+  description        String   @db.Text
+  acceptanceCriteria Json     @map("acceptance_criteria") // Array of criteria
+  priority           String?  // high, medium, low
+  status             String   @default("backlog") // backlog, in_progress, completed
+  externalRef        String?  @map("external_ref") // Reference to external system (JIRA, etc)
+  markdownContent    String   @map("markdown_content") @db.Text
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  project            WorkflowProject @relation(fields: [projectId], references: [id])
+  promptPacks        PromptPack[]
+  implementations    Implementation[]
+
+  @@index([projectId])
+  @@map("user_stories")
+}
+
+model PromptPack {
+  id               String   @id @default(cuid())
+  projectId        String   @map("project_id")
+  storyId          String?  @map("story_id")
+  name             String
+  description      String?
+  context          String   @db.Text
+  prompts          String   @db.Text // JSON string of prompts array
+  customizations   String?  @db.Text // JSON string of customization options
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  project          WorkflowProject @relation(fields: [projectId], references: [id])
+  story            UserStory? @relation(fields: [storyId], references: [id])
+  implementations  Implementation[]
+
+  @@index([projectId, storyId])
+  @@map("prompt_packs")
+}
+
+model Implementation {
+  id               String    @id @default(cuid())
+  projectId        String    @map("project_id")
+  storyId          String    @map("story_id")
+  promptPackId     String    @map("prompt_pack_id")
+  type             String    // manual, platform
+  status           String    // pending, in_progress, completed, failed
+  branchName       String?   @map("branch_name")
+  pullRequestUrl   String?   @map("pull_request_url")
+  commitHash       String?   @map("commit_hash")
+  output           String?   @db.Text
+  error            String?   @db.Text
+  createdAt        DateTime  @default(now()) @map("created_at")
+  completedAt      DateTime? @map("completed_at")
+
+  project          WorkflowProject @relation(fields: [projectId], references: [id])
+  story            UserStory @relation(fields: [storyId], references: [id])
+  promptPack       PromptPack @relation(fields: [promptPackId], references: [id])
+
+  @@index([projectId, storyId])
+  @@map("implementations")
 }

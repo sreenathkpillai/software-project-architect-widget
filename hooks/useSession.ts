@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 
-export type SessionType = 'intro' | 'architect';
+export type SessionType = 'intro' | 'architect' | 'workflow';
 
 export interface IntroBrief {
   whatTheyreDoing: string;
