@@ -244,3 +244,107 @@ enum specification_type {
   third_party_libraries
   readme
 }
+
+// Workflow Models - Added for WORKFLOW_v2_PLAN implementation
+model WorkflowProject {
+  id              String           @id @default(cuid())
+  externalId      String           @default("default_user") // Links to ChainCatalyst user
+  name            String
+  description     String?
+  repositoryUrl   String?
+  repositoryPath  String?
+  branch          String           @default("main")
+  githubToken     String?          // Encrypted GitHub token for private repos
+  analysisStatus  AnalysisStatus   @default(PENDING)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @default(now()) @updatedAt
+
+  codebaseAnalysis WorkflowCodebaseAnalysis?
+  stories         WorkflowStory[]
+  promptPacks     WorkflowPromptPack[]
+
+  @@index([externalId])
+  @@map("workflow_projects")
+}
+
+model WorkflowCodebaseAnalysis {
+  id              String   @id @default(cuid())
+  projectId       String   @unique
+  content         String   @db.Text // Markdown content
+  version         Int      @default(1)
+  analyzedAt      DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  project         WorkflowProject  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("workflow_codebase_analyses")
+}
+
+model WorkflowStory {
+  id              String       @id @default(cuid())
+  projectId       String
+  externalId      String?      // For imported stories from JIRA/DevOps
+  title           String
+  description     String       @db.Text
+  acceptanceCriteria String?   @db.Text
+  priority        Priority     @default(MEDIUM)
+  status          StoryStatus  @default(TODO)
+  source          StorySource  @default(MANUAL)
+  sourceId        String?      // Architect session ID or external system ID
+  storyPoints     Int?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  project         WorkflowProject      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  promptPacks     WorkflowPromptPack[]
+
+  @@index([projectId])
+  @@index([externalId])
+  @@map("workflow_stories")
+}
+
+model WorkflowPromptPack {
+  id              String   @id @default(cuid())
+  projectId       String
+  storyId         String
+  name            String
+  content         Json     // Structured prompt data
+  downloadUrl     String?  // Temporary download URL
+  createdAt       DateTime @default(now())
+
+  project         WorkflowProject  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  story           WorkflowStory    @relation(fields: [storyId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([storyId])
+  @@map("workflow_prompt_packs")
+}
+
+enum AnalysisStatus {
+  PENDING
+  ANALYZING
+  COMPLETED
+  FAILED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum StoryStatus {
+  TODO
+  IN_PROGRESS
+  READY_FOR_IMPLEMENTATION
+  COMPLETED
+}
+
+enum StorySource {
+  MANUAL
+  JIRA
+  AZURE_DEVOPS
+  ARCHITECT
+  GITHUB_ISSUES
+}

@@ -1,9 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   basePath: '/widget',
-  experimental: {
-    appDir: true,
-  },
   // Allow iframe embedding
   async headers() {
     return [
