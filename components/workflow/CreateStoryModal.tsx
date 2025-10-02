@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { useWorkflow } from './WorkflowApp';
+import parentComm from '../../lib/utils/parentCommunication';
 
 interface CreateStoryModalProps {
   projectId: string;
@@ -40,6 +41,10 @@ export default function CreateStoryModal({ projectId, onClose, onCreated }: Crea
       if (!response.ok) {
         throw new Error('Failed to create story');
       }
+
+      // Deduct credits for successful story creation
+      console.log('💳 Triggering credit deduction for story creation');
+      parentComm.signalWorkComplete('story-creation', 1);
 
       onCreated();
     } catch (err) {

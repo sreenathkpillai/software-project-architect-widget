@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useWorkflow } from './WorkflowApp';
+import parentComm from '../../lib/utils/parentCommunication';
 
 interface CodebaseAnalyzerProps {
   projectId: string;

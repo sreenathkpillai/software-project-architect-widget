@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { useWorkflow } from './WorkflowApp';
+import parentComm from '../../lib/utils/parentCommunication';
 
 interface PromptPackGeneratorProps {
   story: any;
@@ -38,6 +39,11 @@ export default function PromptPackGenerator({
 
       const data = await response.json();
       setPromptPack(data.promptPack);
+
+      // Deduct credits for successful prompt pack generation
+      console.log('💳 Triggering credit deduction for prompt pack generation');
+      parentComm.signalWorkComplete('prompt-pack-generation', 1);
+
       onGenerated();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate');

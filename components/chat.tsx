@@ -5,6 +5,7 @@ import { widgetAuth, ThemeConfig } from '@/lib/auth';
 import { WidgetTheme } from '@/lib/theme';
 import { getApiUrl } from '@/lib/api-config';
 import SaveSessionModal from './SaveSessionModal';
+import parentComm from '../lib/utils/parentCommunication';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -380,7 +381,11 @@ export default function Chat({
         // Check if session is complete
         if (data.sessionComplete) {
           setSessionComplete(true);
-          
+
+          // Deduct credits for architect completion (2 credits)
+          console.log('💳 Triggering credit deduction for architect completion');
+          parentComm.signalWorkComplete('architect-completion', 2);
+
           // Auto-transition to document viewer after a short delay
           if (onViewDocuments) {
             setTimeout(() => {

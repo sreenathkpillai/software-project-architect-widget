@@ -6,6 +6,7 @@ import { useWorkflow } from './WorkflowApp';
 import CodebaseAnalyzer from './CodebaseAnalyzer';
 import StoryManager from './StoryManager';
 import RepositoryConnector from './RepositoryConnector';
+import parentComm from '../../lib/utils/parentCommunication';
 
 interface ProjectDashboardProps {
   projectId: string;
@@ -100,6 +101,11 @@ export default function ProjectDashboard({ projectId }: ProjectDashboardProps) {
 
       if (response.ok) {
         console.log('Analysis request successful, fetching updated status...');
+
+        // Deduct credits for analysis CREATION (not completion)
+        console.log('💳 Triggering credit deduction for codebase analysis creation');
+        parentComm.signalWorkComplete('codebase-analysis', 1);
+
         await fetchProjectData(true); // Skip loading update, let status control it
 
         // Only turn off loading if analysis didn't start
