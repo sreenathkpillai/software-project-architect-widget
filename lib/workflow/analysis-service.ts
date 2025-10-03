@@ -158,13 +158,10 @@ export class WorkflowAnalysisService {
     } catch (error) {
       console.error('Analysis error details:', {
         projectId,
-        error: error.message,
-        stack: error.stack,
-        status: error.status,
-        response: error.response?.data,
-        repositoryUrl: project?.repositoryUrl,
-        hasGithubToken: !!project?.githubToken,
-        isGitHubRepo,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        status: (error as any)?.status,
+        response: (error as any)?.response?.data,
         timestamp: new Date().toISOString()
       });
 
@@ -173,7 +170,7 @@ export class WorkflowAnalysisService {
       console.error('Categorized error:', errorInfo);
 
       // Get project for additional context
-      const project = await prisma.workflowProject.findUnique({
+      const projectForError = await prisma.workflowProject.findUnique({
         where: { id: projectId }
       });
 
@@ -182,16 +179,15 @@ export class WorkflowAnalysisService {
         where: { id: projectId },
         data: {
           analysisStatus: 'FAILED',
-          // Store error information in the notes field for now
-          // TODO: Add dedicated error columns to schema
+          // Store error information in the notes field
           notes: JSON.stringify({
             error: {
               code: errorInfo.code,
               message: errorInfo.message,
               details: errorInfo.details,
               timestamp: new Date().toISOString(),
-              repositoryUrl: project?.repositoryUrl,
-              hasGithubToken: !!project?.githubToken
+              repositoryUrl: projectForError?.repositoryUrl,
+              hasGithubToken: !!projectForError?.githubToken
             }
           })
         }
