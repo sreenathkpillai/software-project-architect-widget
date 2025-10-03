@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/db';
 import { WorkflowGitService, FileInfo, RepositoryInfo } from './git-service';
+import { GitHubAnalysisService, GitHubFileContent, GitHubRepoMetadata, AnalysisProgress } from './github-analysis-service';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import * as fs from 'fs';
@@ -50,13 +51,15 @@ export interface AnalysisResult {
 
 export class WorkflowAnalysisService {
   private gitService: WorkflowGitService;
+  private githubService: GitHubAnalysisService;
 
   constructor() {
     this.gitService = new WorkflowGitService();
+    this.githubService = new GitHubAnalysisService();
   }
 
   /**
-   * Analyze codebase and generate compacted analysis
+   * Analyze codebase and generate compacted analysis using GitHub API
    */
   async analyzeCodebase(projectId: string, externalId: string): Promise<void> {
     try {
@@ -79,25 +82,54 @@ export class WorkflowAnalysisService {
         throw new Error('Repository URL not configured');
       }
 
-      // Clone repository
-      const repoPath = await this.gitService.cloneRepository(
-        project.repositoryUrl,
-        projectId,
-        project.branch,
-        project.githubToken || undefined
-      );
+      // Check if this is a GitHub repository
+      const isGitHubRepo = project.repositoryUrl.includes('github.com');
 
-      // Get repository info
-      const repoInfo = await this.gitService.getRepositoryInfo(repoPath);
+      let analysisResult: AnalysisResult;
+      let markdownContent: string;
 
-      // Get file structure
-      const files = await this.gitService.getFileStructure(repoPath);
+      if (isGitHubRepo) {
+        // Use GitHub API approach for GitHub repositories
+        console.log(`Analyzing GitHub repository via API: ${project.repositoryUrl}`);
 
-      // Generate analysis
-      const analysisResult = await this.generateCompactedAnalysis(repoPath, files, repoInfo);
+        const { repoInfo, files, fileContents, metadata } = await this.githubService.analyzeRepository(
+          project.repositoryUrl,
+          project.githubToken || undefined,
+          (progress: AnalysisProgress) => {
+            console.log(`Analysis progress: ${progress.stage} - ${progress.progress}% - ${progress.message}`);
+          }
+        );
 
-      // Format as markdown
-      const markdownContent = this.formatAnalysisAsMarkdown(analysisResult, project.name);
+        // Generate analysis using GitHub API data
+        analysisResult = await this.generateCompactedAnalysisFromGitHub(fileContents, repoInfo, metadata);
+
+        // Format as markdown
+        markdownContent = this.formatAnalysisAsMarkdown(analysisResult, project.name);
+
+      } else {
+        // Fallback to local cloning for non-GitHub repositories
+        console.log(`Falling back to local cloning for non-GitHub repository: ${project.repositoryUrl}`);
+
+        const repoPath = await this.gitService.cloneRepository(
+          project.repositoryUrl,
+          projectId,
+          project.branch,
+          project.githubToken || undefined
+        );
+
+        // Get repository info and files using git service
+        const repoInfo = await this.gitService.getRepositoryInfo(repoPath);
+        const files = await this.gitService.getFileStructure(repoPath);
+
+        // Generate analysis using local files
+        analysisResult = await this.generateCompactedAnalysis(repoPath, files, repoInfo);
+
+        // Format as markdown
+        markdownContent = this.formatAnalysisAsMarkdown(analysisResult, project.name);
+
+        // Cleanup temporary files
+        await this.gitService.cleanupRepository(projectId);
+      }
 
       // Save analysis to database
       await prisma.workflowCodebaseAnalysis.upsert({
@@ -119,12 +151,9 @@ export class WorkflowAnalysisService {
         where: { id: projectId },
         data: {
           analysisStatus: 'COMPLETED',
-          repositoryPath: repoPath
+          repositoryPath: isGitHubRepo ? null : undefined // Don't set path for GitHub API analysis
         }
       });
-
-      // Cleanup temporary files
-      await this.gitService.cleanupRepository(projectId);
 
     } catch (error) {
       console.error('Analysis error:', error);
@@ -243,6 +272,59 @@ export class WorkflowAnalysisService {
 
       // Fallback to basic analysis
       return this.generateBasicAnalysis(repoPath, files, repoInfo);
+    }
+  }
+
+  /**
+   * Generate compacted analysis using GitHub API data
+   */
+  private async generateCompactedAnalysisFromGitHub(
+    fileContents: GitHubFileContent[],
+    repoInfo: RepositoryInfo,
+    metadata: GitHubRepoMetadata
+  ): Promise<AnalysisResult> {
+    try {
+      // Extract README content from file contents
+      const readmeContent = this.extractReadmeFromContents(fileContents);
+
+      // Detect tech stack from GitHub metadata and file contents
+      const techStack = await this.detectTechStackFromGitHub(fileContents, metadata, readmeContent);
+
+      // Create enhanced analysis prompt for GitHub data
+      const prompt = this.createEnhancedAnalysisPromptFromGitHub(repoInfo, techStack, fileContents, readmeContent, metadata);
+
+      // Call AI service
+      let aiAnalysis: any;
+      if (AI_PROVIDER === 'claude') {
+        aiAnalysis = await this.callClaudeForAnalysis(prompt);
+      } else {
+        aiAnalysis = await this.callOpenAIForAnalysis(prompt);
+      }
+
+      // Parse and structure the analysis
+      const analysisResult: AnalysisResult = {
+        overview: {
+          repository: repoInfo.remoteUrl,
+          language: techStack.language,
+          framework: techStack.framework,
+          lastAnalyzed: new Date().toISOString()
+        },
+        architecture: {
+          structure: this.parseFileStructureFromContents(fileContents),
+          keyComponents: this.identifyKeyComponentsFromContents(fileContents),
+          externalDependencies: this.extractDependenciesFromContents(fileContents),
+        },
+        technicalDebt: [],
+        recommendations: [aiAnalysis] // Store the markdown content here
+      };
+
+      return analysisResult;
+
+    } catch (error) {
+      console.error('GitHub AI analysis error:', error);
+
+      // Fallback to basic analysis
+      return this.generateBasicAnalysisFromGitHub(fileContents, repoInfo, metadata);
     }
   }
 
@@ -989,5 +1071,402 @@ ${analysis.recommendations.map(rec => `- ${rec}`).join('\n')}
 ---
 *Analysis generated on ${new Date().toLocaleDateString()} using AI-powered codebase analysis*
 `;
+  }
+
+  /**
+   * Extract README content from GitHub file contents
+   */
+  private extractReadmeFromContents(fileContents: GitHubFileContent[]): string | null {
+    const readmeFile = fileContents.find(file =>
+      /^README\.(md|txt|rst)$/i.test(file.path.split('/').pop() || '')
+    );
+    return readmeFile?.content || null;
+  }
+
+  /**
+   * Detect tech stack from GitHub metadata and file contents
+   */
+  private async detectTechStackFromGitHub(
+    fileContents: GitHubFileContent[],
+    metadata: GitHubRepoMetadata,
+    readmeContent: string | null
+  ): Promise<any> {
+    const techStack = {
+      frontend: [] as string[],
+      backend: [] as string[],
+      database: [] as string[],
+      hosting: [] as string[],
+      auth: [] as string[],
+      cicd: [] as string[],
+      monitoring: [] as string[],
+      framework: metadata.language || 'Unknown',
+      language: metadata.language || 'Unknown'
+    };
+
+    // 1. README Analysis (highest priority)
+    if (readmeContent) {
+      const readmeStack = this.parseREADMETechStack(readmeContent);
+      Object.assign(techStack, readmeStack);
+    }
+
+    // 2. Package.json Analysis from file contents
+    const packageJsonFile = fileContents.find(file => file.path === 'package.json');
+    if (packageJsonFile) {
+      const packageInfo = this.analyzePackageJsonContent(packageJsonFile.content);
+      if (packageInfo) {
+        // Merge package.json findings with README findings
+        techStack.frontend = [...new Set([...techStack.frontend, ...packageInfo.frontend])];
+        techStack.backend = [...new Set([...techStack.backend, ...packageInfo.backend])];
+
+        // Set primary framework and language if not detected from README
+        if (techStack.framework === 'Unknown' || techStack.framework === metadata.language) {
+          techStack.framework = packageInfo.framework || this.detectFrameworkFromContents(fileContents);
+        }
+        if (techStack.language === 'Unknown') {
+          techStack.language = packageInfo.language || metadata.language || 'Unknown';
+        }
+      }
+    }
+
+    // 3. File Pattern Analysis (fallback)
+    if (techStack.framework === 'Unknown' || techStack.framework === metadata.language) {
+      techStack.framework = this.detectFrameworkFromContents(fileContents);
+    }
+
+    return techStack;
+  }
+
+  /**
+   * Analyze package.json content from string
+   */
+  private analyzePackageJsonContent(content: string): any | null {
+    try {
+      const packageJson = JSON.parse(content);
+      const allDeps = {
+        ...packageJson.dependencies || {},
+        ...packageJson.devDependencies || {}
+      };
+
+      const stack = {
+        frontend: [] as string[],
+        backend: [] as string[],
+        framework: 'Unknown',
+        language: 'Unknown'
+      };
+
+      // Frontend frameworks
+      if (allDeps['next']) stack.framework = 'Next.js';
+      else if (allDeps['react']) stack.framework = 'React';
+      else if (allDeps['vue']) stack.framework = 'Vue';
+      else if (allDeps['@angular/core']) stack.framework = 'Angular';
+
+      // Backend frameworks
+      if (allDeps['@nestjs/core']) stack.framework = 'NestJS';
+      else if (allDeps['express']) stack.framework = 'Express';
+      else if (allDeps['fastify']) stack.framework = 'Fastify';
+
+      // Language detection
+      if (allDeps['typescript'] || packageJson.devDependencies?.['@types/node']) {
+        stack.language = 'TypeScript';
+      } else {
+        stack.language = 'JavaScript';
+      }
+
+      // Frontend tech
+      if (allDeps['react']) stack.frontend.push('React');
+      if (allDeps['tailwindcss']) stack.frontend.push('Tailwind CSS');
+      if (allDeps['@mui/material']) stack.frontend.push('Material-UI');
+      if (allDeps['framer-motion']) stack.frontend.push('Framer Motion');
+      if (allDeps['zustand']) stack.frontend.push('Zustand');
+      if (allDeps['@tanstack/react-query']) stack.frontend.push('React Query');
+
+      // Backend tech
+      if (allDeps['prisma']) stack.backend.push('Prisma');
+      if (allDeps['typeorm']) stack.backend.push('TypeORM');
+
+      return stack;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Detect framework from file contents
+   */
+  private detectFrameworkFromContents(fileContents: GitHubFileContent[]): string {
+    const packageJsonFile = fileContents.find(file => file.path === 'package.json');
+
+    if (packageJsonFile) {
+      try {
+        const pkg = JSON.parse(packageJsonFile.content);
+        const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+
+        if (deps.next) return 'Next.js';
+        if (deps.react) return 'React';
+        if (deps.vue) return 'Vue.js';
+        if (deps.angular || deps['@angular/core']) return 'Angular';
+        if (deps.express) return 'Express.js';
+        if (deps.fastify) return 'Fastify';
+        if (deps.nuxt) return 'Nuxt.js';
+      } catch (error) {
+        console.warn('Failed to parse package.json:', error);
+      }
+    }
+
+    // Check for other framework indicators
+    if (fileContents.some(f => f.path.includes('requirements.txt'))) {
+      if (fileContents.some(f => f.content.includes('django'))) return 'Django';
+      if (fileContents.some(f => f.content.includes('flask'))) return 'Flask';
+      return 'Python';
+    }
+
+    if (fileContents.some(f => f.path.includes('go.mod'))) return 'Go';
+    if (fileContents.some(f => f.path.includes('Cargo.toml'))) return 'Rust';
+    if (fileContents.some(f => f.path.includes('composer.json'))) return 'PHP';
+
+    return 'Unknown';
+  }
+
+  /**
+   * Create enhanced analysis prompt for GitHub data
+   */
+  private createEnhancedAnalysisPromptFromGitHub(
+    repoInfo: RepositoryInfo,
+    techStack: any,
+    fileContents: GitHubFileContent[],
+    readmeContent: string | null,
+    metadata: GitHubRepoMetadata
+  ): string {
+    return `You are a senior software architect analyzing a codebase. Generate a comprehensive, structured analysis in markdown format.
+
+Repository: ${repoInfo.remoteUrl}
+GitHub Metadata:
+- Name: ${metadata.name}
+- Description: ${metadata.description}
+- Language: ${metadata.language}
+- Stars: ${metadata.stargazers_count}
+- Forks: ${metadata.forks_count}
+- Topics: ${metadata.topics.join(', ')}
+
+Detected Tech Stack: ${JSON.stringify(techStack, null, 2)}
+
+README Tech Stack:
+${readmeContent ? this.extractTechStackFromReadme(readmeContent) : 'No README found'}
+
+Key Files Sample:
+${fileContents.slice(0, 5).map(f => `${f.path}: ${f.content.substring(0, 200)}...`).join('\n')}
+
+Generate a comprehensive analysis using this EXACT markdown structure:
+
+# Project Analysis: ${metadata.name}
+
+## 🚀 Quick Start
+- **Primary Tech Stack**: [Main technologies used]
+- **Development Commands**: [from package.json or detected patterns]
+- **Environment Setup**: [requirements and setup steps]
+
+## 📋 Project Overview
+- **Type**: [Web App, API, Library, etc.]
+- **Architecture**: [Monorepo, Microservices, SPA, etc.]
+- **Main Language**: [Primary programming language]
+- **Repository Stats**: ${metadata.stargazers_count} stars, ${metadata.forks_count} forks
+
+## 🛠 Technology Stack
+### Frontend
+${techStack.frontend.length > 0 ? techStack.frontend.map((t: string) => `- ${t}`).join('\n') : '- [Analyze and list frontend technologies]'}
+
+### Backend
+${techStack.backend.length > 0 ? techStack.backend.map((t: string) => `- ${t}`).join('\n') : '- [Analyze and list backend technologies]'}
+
+### Database
+${techStack.database.length > 0 ? techStack.database.map((t: string) => `- ${t}`).join('\n') : '- [Analyze and list database technologies]'}
+
+## 📁 Project Structure
+[Provide clear directory structure with explanations]
+
+## 🎯 Entry Points
+- **Main Application**: [Primary entry point file]
+- **API Routes**: [API endpoint locations]
+- **Configuration**: [Config file locations]
+
+## 🗺 API Routes Mapping
+[List and explain API endpoints found in the codebase]
+
+## 📝 Key Files by Development Task
+### Adding New Features
+- Components: [Component directories]
+- Pages: [Page/route directories]
+- API: [API directories]
+
+### Database & Data
+- Schema: [Database schema files]
+- Migrations: [Migration directories]
+
+## 🔧 Development Workflow
+- **Install**: [Installation command]
+- **Development**: [Dev server command]
+- **Build**: [Build command]
+- **Test**: [Test command]
+
+## 🏗 Code Patterns & Conventions
+[Identify and explain coding patterns used]
+
+## 🎯 AI Coding Context
+### For Feature Development
+[Key patterns and structures for adding features]
+
+### For Bug Fixes
+[Error handling patterns and debugging approaches]
+
+Make the analysis practical and actionable for both human developers and AI coding assistants.`;
+  }
+
+  /**
+   * Parse file structure from GitHub file contents
+   */
+  private parseFileStructureFromContents(fileContents: GitHubFileContent[]): Record<string, string> {
+    const structure: Record<string, string> = {};
+
+    // Group files by directory
+    const directories = new Set(
+      fileContents.map(f => {
+        const parts = f.path.split('/');
+        return parts.length > 1 ? parts[0] : '.';
+      }).filter(dir => dir !== '.')
+    );
+
+    directories.forEach(dir => {
+      const dirFiles = fileContents.filter(f => f.path.startsWith(dir + '/'));
+      const fileTypes = Array.from(new Set(dirFiles.map(f => {
+        const parts = f.path.split('.');
+        return parts.length > 1 ? `.${parts[parts.length - 1]}` : '';
+      })));
+
+      structure[dir] = this.describeDirectoryFromFiles(dir, fileTypes);
+    });
+
+    return structure;
+  }
+
+  /**
+   * Describe directory from file types
+   */
+  private describeDirectoryFromFiles(dirName: string, fileTypes: string[]): string {
+    // Common directory patterns
+    if (dirName.includes('component')) return 'React/UI components';
+    if (dirName.includes('page')) return 'Page components/routes';
+    if (dirName.includes('api')) return 'API routes and handlers';
+    if (dirName.includes('lib') || dirName.includes('util')) return 'Utility functions and helpers';
+    if (dirName.includes('style') || dirName.includes('css')) return 'Styling and CSS files';
+    if (dirName.includes('test') || dirName.includes('spec')) return 'Test files';
+    if (dirName.includes('type')) return 'TypeScript type definitions';
+    if (dirName.includes('hook')) return 'React hooks';
+    if (dirName.includes('store') || dirName.includes('redux')) return 'State management';
+    if (dirName.includes('service')) return 'Business logic and services';
+    if (dirName.includes('model')) return 'Data models and schemas';
+
+    return `Files with extensions: ${fileTypes.join(', ')}`;
+  }
+
+  /**
+   * Identify key components from GitHub file contents
+   */
+  private identifyKeyComponentsFromContents(fileContents: GitHubFileContent[]): ComponentInfo[] {
+    const components: ComponentInfo[] = [];
+
+    // Find main entry points
+    const entryPoints = fileContents.filter(f =>
+      ['index.js', 'index.ts', 'main.js', 'main.ts', 'app.js', 'app.ts']
+        .includes(f.path.split('/').pop() || '')
+    );
+
+    entryPoints.forEach(file => {
+      const fileName = file.path.split('/').pop() || '';
+      const extension = fileName.includes('.') ? fileName.split('.').pop() : '';
+
+      components.push({
+        name: fileName.replace(`.${extension}`, ''),
+        location: file.path,
+        purpose: 'Application entry point',
+        dependencies: [],
+        language: this.gitService.detectLanguage(`.${extension}`) || 'Unknown'
+      });
+    });
+
+    // Find config files
+    const configFiles = fileContents.filter(f => {
+      const fileName = f.path.split('/').pop() || '';
+      return f.path.includes('config') ||
+        ['package.json', 'tsconfig.json', 'next.config.js'].includes(fileName);
+    });
+
+    configFiles.forEach(file => {
+      const fileName = file.path.split('/').pop() || '';
+      const extension = fileName.includes('.') ? fileName.split('.').pop() : '';
+
+      components.push({
+        name: fileName,
+        location: file.path,
+        purpose: 'Configuration',
+        dependencies: [],
+        language: this.gitService.detectLanguage(`.${extension}`) || 'Configuration'
+      });
+    });
+
+    return components;
+  }
+
+  /**
+   * Extract dependencies from GitHub file contents
+   */
+  private extractDependenciesFromContents(fileContents: GitHubFileContent[]): string[] {
+    const dependencies: string[] = [];
+
+    // Node.js dependencies
+    const packageJsonFile = fileContents.find(f => f.path === 'package.json');
+    if (packageJsonFile) {
+      try {
+        const pkg = JSON.parse(packageJsonFile.content);
+        const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
+        dependencies.push(...deps);
+      } catch (error) {
+        console.warn('Failed to parse package.json:', error);
+      }
+    }
+
+    return Array.from(new Set(dependencies)).sort();
+  }
+
+  /**
+   * Generate basic analysis fallback for GitHub data
+   */
+  private generateBasicAnalysisFromGitHub(
+    fileContents: GitHubFileContent[],
+    repoInfo: RepositoryInfo,
+    metadata: GitHubRepoMetadata
+  ): AnalysisResult {
+    const framework = this.detectFrameworkFromContents(fileContents);
+    const language = metadata.language || 'Unknown';
+
+    return {
+      overview: {
+        repository: repoInfo.remoteUrl,
+        language,
+        framework,
+        lastAnalyzed: new Date().toISOString()
+      },
+      architecture: {
+        structure: this.parseFileStructureFromContents(fileContents),
+        keyComponents: this.identifyKeyComponentsFromContents(fileContents),
+        externalDependencies: this.extractDependenciesFromContents(fileContents)
+      },
+      technicalDebt: [],
+      recommendations: [
+        'Complete automated analysis was not available',
+        'Consider running manual code review',
+        'Check for security vulnerabilities',
+        'Review performance optimizations'
+      ]
+    };
   }
 }

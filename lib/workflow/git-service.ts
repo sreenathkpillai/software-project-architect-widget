@@ -232,7 +232,7 @@ export class WorkflowGitService {
   /**
    * Detect programming language from file extension
    */
-  private detectLanguage(extension: string): string | undefined {
+  detectLanguage(extension: string): string | undefined {
     const languageMap: { [key: string]: string } = {
       '.js': 'javascript',
       '.jsx': 'javascript',
