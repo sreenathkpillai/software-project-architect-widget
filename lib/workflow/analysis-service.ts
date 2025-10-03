@@ -156,16 +156,122 @@ export class WorkflowAnalysisService {
       });
 
     } catch (error) {
-      console.error('Analysis error:', error);
+      console.error('Analysis error details:', {
+        projectId,
+        error: error.message,
+        stack: error.stack,
+        status: error.status,
+        response: error.response?.data,
+        repositoryUrl: project?.repositoryUrl,
+        hasGithubToken: !!project?.githubToken,
+        isGitHubRepo,
+        timestamp: new Date().toISOString()
+      });
 
-      // Update project status to failed
+      // Categorize the error for better debugging
+      const errorInfo = this.categorizeError(error);
+      console.error('Categorized error:', errorInfo);
+
+      // Get project for additional context
+      const project = await prisma.workflowProject.findUnique({
+        where: { id: projectId }
+      });
+
+      // Update project status to failed with error details
       await prisma.workflowProject.update({
         where: { id: projectId },
-        data: { analysisStatus: 'FAILED' }
+        data: {
+          analysisStatus: 'FAILED',
+          // Store error information in the notes field for now
+          // TODO: Add dedicated error columns to schema
+          notes: JSON.stringify({
+            error: {
+              code: errorInfo.code,
+              message: errorInfo.message,
+              details: errorInfo.details,
+              timestamp: new Date().toISOString(),
+              repositoryUrl: project?.repositoryUrl,
+              hasGithubToken: !!project?.githubToken
+            }
+          })
+        }
       });
 
       throw error;
     }
+  }
+
+  /**
+   * Categorize error for better debugging
+   */
+  private categorizeError(error: any): { code: string, message: string, details: any } {
+    // GitHub API errors
+    if (error.status === 403) {
+      return {
+        code: 'GITHUB_ACCESS_DENIED',
+        message: 'Repository access denied. Check GitHub token permissions.',
+        details: { status: error.status, response: error.response?.data }
+      };
+    }
+    if (error.status === 404) {
+      return {
+        code: 'REPOSITORY_NOT_FOUND',
+        message: 'Repository not found or has been deleted.',
+        details: { status: error.status, response: error.response?.data }
+      };
+    }
+    if (error.status === 401) {
+      return {
+        code: 'GITHUB_AUTH_INVALID',
+        message: 'GitHub authentication failed. Token may be expired.',
+        details: { status: error.status, response: error.response?.data }
+      };
+    }
+    if (error.message?.includes('rate limit') || error.status === 429) {
+      return {
+        code: 'RATE_LIMIT_EXCEEDED',
+        message: 'GitHub API rate limit exceeded. Try again later.',
+        details: { status: error.status, response: error.response?.data }
+      };
+    }
+
+    // OpenAI/AI service errors
+    if (error.message?.includes('OpenAI') || error.message?.includes('API')) {
+      return {
+        code: 'AI_SERVICE_ERROR',
+        message: 'AI analysis service error.',
+        details: { originalError: error.message }
+      };
+    }
+
+    // Network/timeout errors
+    if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
+      return {
+        code: 'NETWORK_ERROR',
+        message: 'Network connection error during analysis.',
+        details: { code: error.code, message: error.message }
+      };
+    }
+
+    // Database errors
+    if (error.code?.startsWith('P') && error.meta) { // Prisma errors
+      return {
+        code: 'DATABASE_ERROR',
+        message: 'Database error during analysis.',
+        details: { code: error.code, meta: error.meta }
+      };
+    }
+
+    // Generic error
+    return {
+      code: 'UNKNOWN_ERROR',
+      message: error.message || 'An unexpected error occurred during analysis.',
+      details: {
+        stack: error.stack,
+        name: error.name,
+        originalError: error
+      }
+    };
   }
 
   /**

@@ -23,6 +23,36 @@ export default function ProjectDashboard({ projectId }: ProjectDashboardProps) {
   const [showRepositoryConnector, setShowRepositoryConnector] = useState(false);
   const [showAnalysisViewer, setShowAnalysisViewer] = useState(false);
   const [analysisStatus, setAnalysisStatus] = useState<string>('PENDING');
+  const [errorDetails, setErrorDetails] = useState<any>(null);
+
+  const fetchErrorDetails = async () => {
+    try {
+      const response = await fetch(`/widget/api/workflow/projects/${projectId}/debug?externalId=${externalId}`);
+      if (response.ok) {
+        const debugData = await response.json();
+        setErrorDetails(debugData);
+
+        // Log comprehensive error details to console for debugging
+        console.group('🚨 ANALYSIS FAILURE DEBUG INFORMATION');
+        console.error('Project:', debugData.project);
+        console.error('Error Info:', debugData.errorInfo);
+        console.error('Debug Info:', debugData.debugInfo);
+
+        if (debugData.errorInfo) {
+          console.error('❌ ERROR CODE:', debugData.errorInfo.code);
+          console.error('❌ ERROR MESSAGE:', debugData.errorInfo.message);
+          console.error('❌ ERROR DETAILS:', debugData.errorInfo.details);
+          console.error('❌ TIMESTAMP:', debugData.errorInfo.timestamp);
+          console.error('❌ REPOSITORY URL:', debugData.errorInfo.repositoryUrl);
+          console.error('❌ HAS GITHUB TOKEN:', debugData.errorInfo.hasGithubToken);
+        }
+
+        console.groupEnd();
+      }
+    } catch (error) {
+      console.error('Failed to fetch error details:', error);
+    }
+  };
 
   const fetchProjectData = async (skipLoadingUpdate = false) => {
     try {
@@ -40,6 +70,11 @@ export default function ProjectDashboard({ projectId }: ProjectDashboardProps) {
 
         // Log status changes for debugging
         console.log('Analysis status updated to:', newStatus);
+
+        // If analysis failed, fetch detailed error information for debugging
+        if (newStatus === 'FAILED') {
+          fetchErrorDetails();
+        }
       }
 
       if (analysisRes.ok) {
