@@ -130,27 +130,46 @@ export class RateLimitMonitor {
    * Determine if we should use GraphQL based on rate limits
    */
   async shouldUseGraphQL(token?: string): Promise<boolean> {
-    if (!token) return false;
+    if (!token) {
+      console.log('❌ shouldUseGraphQL: No token provided');
+      return false;
+    }
 
     try {
+      console.log('🔍 Checking rate limits for decision...');
+
       // Check both rate limits in parallel
       const [restInfo, graphqlInfo] = await Promise.all([
-        this.checkRestRateLimit(token),
-        this.checkGraphQLRateLimit(token)
+        this.checkRestRateLimit(token).catch(err => {
+          console.error('Failed to check REST rate limit:', err);
+          return null;
+        }),
+        this.checkGraphQLRateLimit(token).catch(err => {
+          console.error('Failed to check GraphQL rate limit:', err);
+          return null;
+        })
       ]);
+
+      if (!restInfo || !graphqlInfo) {
+        console.error('❌ Could not check rate limits, defaulting to REST');
+        return false;
+      }
 
       // GraphQL is generally more efficient, prefer it if available
       // Only switch to REST if GraphQL is severely limited
       const graphqlRemaining = graphqlInfo.graphql?.remaining || 0;
       const restRemaining = restInfo.core.remaining;
 
-      console.log(`Rate Limits - REST: ${restRemaining}/5000, GraphQL: ${graphqlRemaining}/5000`);
+      console.log(`📊 Rate Limits - REST: ${restRemaining}/5000, GraphQL: ${graphqlRemaining}/5000`);
 
       // Use GraphQL if it has at least 100 requests remaining
-      return graphqlRemaining > 100;
+      const decision = graphqlRemaining > 100;
+      console.log(`✅ Decision: Use ${decision ? 'GraphQL' : 'REST'} API`);
 
-    } catch (error) {
-      console.error('Error checking rate limits:', error);
+      return decision;
+
+    } catch (error: any) {
+      console.error('❌ Error in shouldUseGraphQL:', error.message || error);
       // Default to REST on error
       return false;
     }

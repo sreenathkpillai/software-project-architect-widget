@@ -105,14 +105,32 @@ export class WorkflowAnalysisService {
         // Try GraphQL first (more efficient), fallback to REST API
         const token = project.githubToken || process.env.GITHUB_TOKEN || process.env.GITHUB_APP_TOKEN;
 
+        console.log('🔍 DEBUG: Token check:', {
+          hasProjectToken: !!project.githubToken,
+          hasEnvToken: !!(process.env.GITHUB_TOKEN || process.env.GITHUB_APP_TOKEN),
+          tokenLength: token?.length,
+          tokenPrefix: token?.substring(0, 10),
+          tokenType: token?.startsWith('gho_') ? 'OAuth User Token' :
+                     token?.startsWith('ghp_') ? 'Personal Access Token' :
+                     token?.startsWith('ghs_') ? 'OAuth App Token' : 'Unknown'
+        });
+
         // Initialize GraphQL service with user's OAuth token if we have one
         if (token && !this.githubGraphQLService) {
+          console.log('🔧 Initializing GraphQL service with token');
           this.githubGraphQLService = new GitHubGraphQLService(token);
         }
 
         // Check rate limits to decide which API to use
         const rateLimitMonitor = RateLimitMonitor.getInstance();
         const shouldUseGraphQL = token ? await rateLimitMonitor.shouldUseGraphQL(token) : false;
+
+        console.log('🎯 GraphQL decision:', {
+          hasToken: !!token,
+          hasGraphQLService: !!this.githubGraphQLService,
+          shouldUseGraphQL,
+          reason: !token ? 'no token' : !this.githubGraphQLService ? 'no service' : !shouldUseGraphQL ? 'rate limit check failed' : 'ready'
+        });
 
         try {
           if (shouldUseGraphQL && this.githubGraphQLService) {
@@ -139,15 +157,15 @@ export class WorkflowAnalysisService {
         } catch (graphqlError: any) {
           // Check if it's a rate limit error
           if (graphqlError.message?.includes('rate limit')) {
-            console.error('GraphQL rate limit exceeded:', graphqlError.message);
+            console.error('❌ GraphQL rate limit exceeded:', graphqlError.message);
             // Wait for rate limit reset if needed
             await rateLimitMonitor.waitForRateLimitReset(token, 'graphql');
           } else {
-            console.warn('GraphQL API failed:', graphqlError.message);
+            console.warn('⚠️ GraphQL API failed (will try REST):', graphqlError.message);
           }
 
           // Fallback to REST API
-          console.log('Falling back to REST API...');
+          console.log('🔄 Falling back to REST API...');
 
           // Check REST rate limit
           if (token) {

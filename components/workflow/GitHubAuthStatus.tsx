@@ -221,41 +221,72 @@ export default function GitHubAuthStatus({ onSwitchAccount, compact = false, pro
     }
   };
 
-  // Don't render if not authenticated
-  if (!githubAuth.isAuthenticated) {
-    return null;
-  }
+  // Always render - show authentication status (connected/disconnected)
 
   if (compact) {
     // Compact version for project title area
-    return (
-      <div className="flex items-center space-x-2 ml-4">
-        <div className="flex items-center space-x-2 text-xs text-green-300 bg-green-900/20 px-3 py-1 rounded-full border border-green-500/20">
-          <div className="w-2 h-2 bg-green-400 rounded-full"></div>
-          <span>GitHub: {githubAuth.username}</span>
-          <button
-            onClick={handleSwitchAccount}
-            className="ml-2 px-2 py-0.5 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition-colors"
-          >
-            Switch Account
-          </button>
+    if (githubAuth.isAuthenticated) {
+      return (
+        <div className="flex items-center space-x-2 ml-4">
+          <div className="flex items-center space-x-2 text-xs text-green-300 bg-green-900/20 px-3 py-1 rounded-full border border-green-500/20">
+            <div className="w-2 h-2 bg-green-400 rounded-full"></div>
+            <span>GitHub: {githubAuth.username}</span>
+            <button
+              onClick={handleSwitchAccount}
+              className="ml-2 px-2 py-0.5 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition-colors"
+            >
+              Switch Account
+            </button>
+          </div>
         </div>
-      </div>
-    );
+      );
+    } else {
+      // Show disconnected state
+      return (
+        <div className="flex items-center space-x-2 ml-4">
+          <div className="flex items-center space-x-2 text-xs text-red-300 bg-red-900/20 px-3 py-1 rounded-full border border-red-500/20">
+            <div className="w-2 h-2 bg-red-400 rounded-full"></div>
+            <span>GitHub: Disconnected</span>
+            <button
+              onClick={triggerGitHubAuth}
+              className="ml-2 px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors"
+            >
+              Connect
+            </button>
+          </div>
+        </div>
+      );
+    }
   }
 
   // Full version for modal
-  return (
-    <div className="flex items-center justify-between">
-      <div className="text-xs text-green-300 bg-green-900/20 px-2 py-1 rounded">
-        🔒 Private repositories accessible
+  if (githubAuth.isAuthenticated) {
+    return (
+      <div className="flex items-center justify-between">
+        <div className="text-xs text-green-300 bg-green-900/20 px-2 py-1 rounded">
+          🔒 Private repositories accessible as {githubAuth.username}
+        </div>
+        <button
+          onClick={handleSwitchAccount}
+          className="px-3 py-1 bg-gray-600 hover:bg-gray-700 text-white text-xs rounded transition-colors"
+        >
+          Switch Account
+        </button>
       </div>
-      <button
-        onClick={handleSwitchAccount}
-        className="px-3 py-1 bg-gray-600 hover:bg-gray-700 text-white text-xs rounded transition-colors"
-      >
-        Switch Account
-      </button>
-    </div>
-  );
+    );
+  } else {
+    return (
+      <div className="flex items-center justify-between">
+        <div className="text-xs text-red-300 bg-red-900/20 px-2 py-1 rounded">
+          ⚠️ GitHub disconnected - repository analysis limited
+        </div>
+        <button
+          onClick={triggerGitHubAuth}
+          className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors"
+        >
+          Connect GitHub
+        </button>
+      </div>
+    );
+  }
 }

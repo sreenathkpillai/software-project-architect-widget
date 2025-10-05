@@ -35,9 +35,14 @@ export class GitHubGraphQLService {
   private rateLimitBuffer = 100;
 
   constructor(githubToken: string) {
+    // OAuth tokens use 'Bearer' format, PATs use 'token' format
+    const authHeader = githubToken.startsWith('gho_')
+      ? `Bearer ${githubToken}`
+      : `token ${githubToken}`;
+
     this.graphqlClient = graphql.defaults({
       headers: {
-        authorization: `token ${githubToken}`,
+        authorization: authHeader,
       },
     });
   }
@@ -58,11 +63,25 @@ export class GitHubGraphQLService {
   }> {
     try {
       const { owner, repo } = this.parseRepositoryUrl(repoUrl);
+      console.log('📦 Parsed repository:', { owner, repo, url: repoUrl });
 
       // Use provided token if available
+      // OAuth tokens should use 'Bearer' format, PATs use 'token' format
+      const authHeader = githubToken?.startsWith('gho_')
+        ? `Bearer ${githubToken}`
+        : `token ${githubToken}`;
+
       const client = githubToken ? graphql.defaults({
-        headers: { authorization: `token ${githubToken}` }
+        headers: { authorization: authHeader }
       }) : this.graphqlClient;
+
+      console.log('🔑 Using token:', {
+        hasToken: !!githubToken,
+        tokenType: githubToken?.startsWith('gho_') ? 'OAuth User' :
+                   githubToken?.startsWith('ghp_') ? 'Personal Access' :
+                   githubToken?.startsWith('ghs_') ? 'OAuth App' : 'Unknown',
+        tokenLength: githubToken?.length
+      });
 
       onProgress?.({
         stage: 'fetching_metadata',
@@ -151,6 +170,7 @@ export class GitHubGraphQLService {
    * Fetch repository structure and key files in a single GraphQL query
    */
   private async fetchRepositoryStructure(client: typeof graphql, owner: string, repo: string): Promise<any> {
+    console.log('🔍 GraphQL Query Parameters:', { owner, repo });
     const query = `
       query GetRepoStructure($owner: String!, $repo: String!) {
         repository(owner: $owner, name: $repo) {
@@ -456,16 +476,19 @@ export class GitHubGraphQLService {
    * Check GraphQL rate limit
    */
   private checkRateLimit(rateLimit: GraphQLRateLimit): void {
-    if (!rateLimit) return;
+    if (!rateLimit) {
+      console.warn('⚠️ No rate limit info in GraphQL response');
+      return;
+    }
 
     console.log(`GitHub GraphQL API - Remaining: ${rateLimit.remaining}/${rateLimit.limit}, Cost: ${rateLimit.cost}, Reset: ${rateLimit.resetAt}`);
 
     if (rateLimit.remaining < this.rateLimitBuffer) {
       const resetTime = new Date(rateLimit.resetAt);
-      throw new Error(
-        `GitHub API rate limit too low (${rateLimit.remaining} remaining). ` +
-        `Please wait until ${resetTime.toLocaleString()} or use a different GitHub token.`
-      );
+      const errorMsg = `GitHub GraphQL API rate limit too low (${rateLimit.remaining} remaining). ` +
+        `Please wait until ${resetTime.toLocaleString()} or use a different GitHub token.`;
+      console.error('❌ GraphQL Rate limit check failed:', errorMsg);
+      throw new Error(errorMsg);
     }
   }
 
@@ -587,23 +610,32 @@ export class GitHubGraphQLService {
     if (error.errors?.[0]) {
       const gqlError = error.errors[0];
 
+      // Check if it's an organization OAuth restriction
+      if (gqlError.type === 'NOT_FOUND' && gqlError.message?.includes('Could not resolve to a Repository')) {
+        // This often means OAuth restrictions for private org repos
+        return new Error(
+          'OAUTH_RESTRICTION: Cannot access this repository. ' +
+          'If this is a private organization repository, please ask your organization admin to approve this OAuth app.'
+        );
+      }
+
       if (gqlError.type === 'RATE_LIMITED') {
-        return new Error('GitHub GraphQL API rate limit exceeded. Please try again later.');
+        return new Error('RATE_LIMIT: GitHub GraphQL API rate limit exceeded. Please try again later.');
       }
 
       if (gqlError.type === 'NOT_FOUND') {
-        return new Error('Repository not found or is private. Please check the URL and ensure you have access.');
+        return new Error('NOT_FOUND: Repository not found or is private. Please check the URL and ensure you have access.');
       }
 
       if (gqlError.type === 'FORBIDDEN') {
-        return new Error('Access forbidden. Please check your GitHub token permissions.');
+        return new Error('ACCESS_FORBIDDEN: Access forbidden. Please check your GitHub token permissions.');
       }
 
       return new Error(`GitHub GraphQL error: ${gqlError.message}`);
     }
 
     if (error.message?.includes('401')) {
-      return new Error('Invalid GitHub token. Please provide a valid personal access token.');
+      return new Error('INVALID_TOKEN: Invalid GitHub token. Please reconnect your GitHub account.');
     }
 
     return new Error(`GitHub API error: ${error.message || 'Unknown error occurred'}`);

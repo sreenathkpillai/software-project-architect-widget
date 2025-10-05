@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -69,6 +70,32 @@ export async function GET(request: NextRequest) {
           <script>
             // Store auth data for parent window to pick up
             localStorage.setItem('github_auth_result', JSON.stringify(${JSON.stringify(authData)}));
+
+            // Also try to save to database if project ID is available
+            const projectId = localStorage.getItem('github_oauth_project');
+            const externalId = localStorage.getItem('workflow_external_id');
+            if (projectId && externalId) {
+              // Make API call to save token to database
+              fetch('/widget/api/workflow/projects/' + projectId + '/connect', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  githubToken: ${JSON.stringify(tokenData.access_token)},
+                  username: ${JSON.stringify(userData.login)},
+                  externalId: externalId
+                })
+              }).then(response => {
+                if (response.ok) {
+                  console.log('GitHub token saved to database for project:', projectId);
+                } else {
+                  console.error('Failed to save GitHub token to database');
+                }
+              }).catch(error => {
+                console.error('Error saving GitHub token:', error);
+              });
+            }
 
             // Also try to notify parent window directly
             if (window.opener) {

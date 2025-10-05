@@ -458,23 +458,26 @@ export class GitHubAnalysisService {
    */
   private async checkRateLimit(octokit: Octokit): Promise<void> {
     try {
+      console.log('📊 Checking REST API rate limit...');
       const { data: rateLimit } = await octokit.rest.rateLimit.get();
       const remaining = rateLimit.rate.remaining;
       const resetTime = new Date(rateLimit.rate.reset * 1000);
 
-      console.log(`GitHub API rate limit: ${remaining}/${rateLimit.rate.limit} remaining. Reset at: ${resetTime}`);
+      console.log(`GitHub REST API rate limit: ${remaining}/${rateLimit.rate.limit} remaining. Reset at: ${resetTime}`);
 
       if (remaining < this.rateLimitBuffer) {
         const waitTime = resetTime.getTime() - Date.now();
-        throw new Error(
-          `GitHub API rate limit too low (${remaining} remaining). ` +
-          `Please wait until ${resetTime.toLocaleString()} or use a different GitHub token.`
-        );
+        const errorMsg = `GitHub REST API rate limit too low (${remaining} remaining). ` +
+          `Please wait until ${resetTime.toLocaleString()} or use a different GitHub token.`;
+        console.error('❌ REST API Rate limit check failed:', errorMsg);
+        throw new Error(errorMsg);
       }
     } catch (error: any) {
       if (error.status === 401) {
+        console.error('❌ REST API Auth failed - invalid token');
         throw new Error('Invalid GitHub token. Please provide a valid personal access token.');
       }
+      console.error('❌ REST API Rate limit check error:', error.message);
       throw error;
     }
   }
@@ -567,20 +570,32 @@ export class GitHubAnalysisService {
    * Handle GitHub API errors with user-friendly messages
    */
   private handleGitHubError(error: any): Error {
+    // Check for OAuth App restrictions first (most specific)
+    if (error.status === 403 && error.response?.data?.message?.includes('OAuth App access restrictions')) {
+      return new Error(
+        'OAUTH_RESTRICTION: This organization has restricted OAuth app access. ' +
+        'Please ask your organization admin to approve this app, or reconnect with organization access permissions.'
+      );
+    }
+
+    if (error.status === 403 && error.response?.data?.message?.includes('rate limit')) {
+      return new Error('RATE_LIMIT: GitHub API rate limit exceeded. Please wait before trying again.');
+    }
+
     if (error.status === 403) {
-      return new Error('GitHub API rate limit exceeded or repository access forbidden. Please try again later or provide a GitHub token.');
+      return new Error('ACCESS_FORBIDDEN: Repository access forbidden. Please check your permissions.');
     }
 
     if (error.status === 404) {
-      return new Error('Repository not found or is private. Please check the URL and ensure you have access.');
+      return new Error('NOT_FOUND: Repository not found or is private. Please check the URL and ensure you have access.');
     }
 
     if (error.status === 401) {
-      return new Error('Invalid GitHub token. Please provide a valid personal access token.');
+      return new Error('INVALID_TOKEN: Invalid GitHub token. Please reconnect your GitHub account.');
     }
 
     if (error.message?.includes('rate limit')) {
-      return new Error('GitHub API rate limit exceeded. Please wait before analyzing another repository.');
+      return new Error('RATE_LIMIT: GitHub API rate limit exceeded. Please wait before analyzing another repository.');
     }
 
     return new Error(`GitHub API error: ${error.message || 'Unknown error occurred'}`);
