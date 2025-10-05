@@ -59,12 +59,8 @@ export class WorkflowAnalysisService {
   constructor() {
     this.gitService = new WorkflowGitService();
     this.githubService = new GitHubAnalysisService();
-
-    // Initialize GraphQL service if token is available
-    const githubToken = process.env.GITHUB_TOKEN || process.env.GITHUB_APP_TOKEN;
-    if (githubToken) {
-      this.githubGraphQLService = new GitHubGraphQLService(githubToken);
-    }
+    // GraphQL service will be initialized on-demand with user's OAuth token
+    this.githubGraphQLService = null;
   }
 
   /**
@@ -108,6 +104,11 @@ export class WorkflowAnalysisService {
 
         // Try GraphQL first (more efficient), fallback to REST API
         const token = project.githubToken || process.env.GITHUB_TOKEN || process.env.GITHUB_APP_TOKEN;
+
+        // Initialize GraphQL service with user's OAuth token if we have one
+        if (token && !this.githubGraphQLService) {
+          this.githubGraphQLService = new GitHubGraphQLService(token);
+        }
 
         // Check rate limits to decide which API to use
         const rateLimitMonitor = RateLimitMonitor.getInstance();
