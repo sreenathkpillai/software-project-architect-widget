@@ -1,6 +1,8 @@
 import { prisma } from '@/lib/db';
 import { WorkflowGitService, FileInfo, RepositoryInfo } from './git-service';
 import { GitHubAnalysisService, GitHubFileContent, GitHubRepoMetadata, AnalysisProgress } from './github-analysis-service';
+import { GitHubGraphQLService } from './github-graphql-service';
+import { RateLimitMonitor } from './rate-limit-monitor';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import * as fs from 'fs';
@@ -52,10 +54,17 @@ export interface AnalysisResult {
 export class WorkflowAnalysisService {
   private gitService: WorkflowGitService;
   private githubService: GitHubAnalysisService;
+  private githubGraphQLService: GitHubGraphQLService | null = null;
 
   constructor() {
     this.gitService = new WorkflowGitService();
     this.githubService = new GitHubAnalysisService();
+
+    // Initialize GraphQL service if token is available
+    const githubToken = process.env.GITHUB_TOKEN || process.env.GITHUB_APP_TOKEN;
+    if (githubToken) {
+      this.githubGraphQLService = new GitHubGraphQLService(githubToken);
+    }
   }
 
   /**
@@ -92,13 +101,76 @@ export class WorkflowAnalysisService {
         // Use GitHub API approach for GitHub repositories
         console.log(`Analyzing GitHub repository via API: ${project.repositoryUrl}`);
 
-        const { repoInfo, files, fileContents, metadata } = await this.githubService.analyzeRepository(
-          project.repositoryUrl,
-          project.githubToken || undefined,
-          (progress: AnalysisProgress) => {
-            console.log(`Analysis progress: ${progress.stage} - ${progress.progress}% - ${progress.message}`);
+        let repoInfo: RepositoryInfo;
+        let files: FileInfo[];
+        let fileContents: GitHubFileContent[];
+        let metadata: GitHubRepoMetadata;
+
+        // Try GraphQL first (more efficient), fallback to REST API
+        const token = project.githubToken || process.env.GITHUB_TOKEN || process.env.GITHUB_APP_TOKEN;
+
+        // Check rate limits to decide which API to use
+        const rateLimitMonitor = RateLimitMonitor.getInstance();
+        const shouldUseGraphQL = token ? await rateLimitMonitor.shouldUseGraphQL(token) : false;
+
+        try {
+          if (shouldUseGraphQL && this.githubGraphQLService) {
+            console.log('Using GitHub GraphQL API for efficient analysis...');
+
+            // Check and log rate limit before starting
+            const rateLimitInfo = await rateLimitMonitor.checkGraphQLRateLimit(token!);
+            console.log('GraphQL Rate Limit:', rateLimitMonitor.formatRateLimitInfo(rateLimitInfo));
+
+            const graphqlResult = await this.githubGraphQLService.analyzeRepository(
+              project.repositoryUrl,
+              token,
+              (progress: AnalysisProgress) => {
+                console.log(`GraphQL Analysis: ${progress.stage} - ${progress.progress}% - ${progress.message}`);
+              }
+            );
+            repoInfo = graphqlResult.repoInfo;
+            files = graphqlResult.files;
+            fileContents = graphqlResult.fileContents;
+            metadata = graphqlResult.metadata;
+          } else {
+            throw new Error('Using REST API due to rate limits or configuration');
           }
-        );
+        } catch (graphqlError: any) {
+          // Check if it's a rate limit error
+          if (graphqlError.message?.includes('rate limit')) {
+            console.error('GraphQL rate limit exceeded:', graphqlError.message);
+            // Wait for rate limit reset if needed
+            await rateLimitMonitor.waitForRateLimitReset(token, 'graphql');
+          } else {
+            console.warn('GraphQL API failed:', graphqlError.message);
+          }
+
+          // Fallback to REST API
+          console.log('Falling back to REST API...');
+
+          // Check REST rate limit
+          if (token) {
+            const restRateLimit = await rateLimitMonitor.checkRestRateLimit(token);
+            console.log('REST Rate Limit:', rateLimitMonitor.formatRateLimitInfo(restRateLimit));
+
+            // Wait if rate limit is low
+            if (restRateLimit.core.remaining < 100) {
+              await rateLimitMonitor.waitForRateLimitReset(token, 'rest');
+            }
+          }
+
+          const restResult = await this.githubService.analyzeRepository(
+            project.repositoryUrl,
+            project.githubToken || undefined,
+            (progress: AnalysisProgress) => {
+              console.log(`REST Analysis: ${progress.stage} - ${progress.progress}% - ${progress.message}`);
+            }
+          );
+          repoInfo = restResult.repoInfo;
+          files = restResult.files;
+          fileContents = restResult.fileContents;
+          metadata = restResult.metadata;
+        }
 
         // Generate analysis using GitHub API data
         analysisResult = await this.generateCompactedAnalysisFromGitHub(fileContents, repoInfo, metadata);

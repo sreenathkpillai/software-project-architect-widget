@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useWorkflow } from './WorkflowApp';
+import GitHubAuthStatus from './GitHubAuthStatus';
 
 interface RepositoryConnectorProps {
   projectId: string;
@@ -401,42 +402,13 @@ export default function RepositoryConnector({ projectId, project, onClose, onCon
                   </div>
                 </div>
               ) : (
-                <div className="flex items-center justify-between">
-                  <div className="text-xs text-green-300 bg-green-900/20 px-2 py-1 rounded">
-                    🔒 Private repositories accessible
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      console.log('User explicitly clicked disconnect - clearing ALL auth storage');
-                      setGithubAuth({ isAuthenticated: false, username: '', token: '' });
-
-                      // Clear ALL possible auth keys to prevent auto-reconnection
-                      try {
-                        const authKeys = [
-                          `github_auth_${externalId}`,
-                          'github_auth', // fallback without external id
-                          'github_auth_global', // global fallback
-                          'github_auth_result', // temp result storage
-                          'github_oauth_state', // oauth state
-                          'github_oauth_project' // oauth project
-                        ];
-
-                        authKeys.forEach(key => {
-                          localStorage.removeItem(key);
-                          console.log(`Cleared auth key: ${key}`);
-                        });
-
-                        console.log('All GitHub authentication data cleared - user can now switch accounts');
-                      } catch (error) {
-                        console.error('Error clearing GitHub auth:', error);
-                      }
-                    }}
-                    className="px-3 py-1 bg-gray-600 hover:bg-gray-700 text-white text-xs rounded transition-colors"
-                  >
-                    Disconnect
-                  </button>
-                </div>
+                <GitHubAuthStatus
+                  projectId={projectId}
+                  onSwitchAccount={() => {
+                    // Reset local state after switching
+                    setGithubAuth({ isAuthenticated: false, username: '', token: '' });
+                  }}
+                />
               )}
             </div>
           )}

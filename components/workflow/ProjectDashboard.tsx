@@ -6,6 +6,7 @@ import { useWorkflow } from './WorkflowApp';
 import CodebaseAnalyzer from './CodebaseAnalyzer';
 import StoryManager from './StoryManager';
 import RepositoryConnector from './RepositoryConnector';
+import GitHubAuthStatus from './GitHubAuthStatus';
 import parentComm from '../../lib/utils/parentCommunication';
 
 interface ProjectDashboardProps {
@@ -215,10 +216,16 @@ export default function ProjectDashboard({ projectId }: ProjectDashboardProps) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
           </button>
-          <div>
-            <h2 className="text-2xl font-bold text-white">{project.name}</h2>
-            {project.description && (
-              <p className="text-gray-400 mt-1">{project.description}</p>
+          <div className="flex items-center">
+            <div>
+              <h2 className="text-2xl font-bold text-white">{project.name}</h2>
+              {project.description && (
+                <p className="text-gray-400 mt-1">{project.description}</p>
+              )}
+            </div>
+            {/* Show GitHub auth status only when repository is connected and it's a GitHub repo */}
+            {isRepositoryConnected && project.repositoryUrl?.includes('github.com') && (
+              <GitHubAuthStatus compact={true} projectId={projectId} />
             )}
           </div>
         </div>
