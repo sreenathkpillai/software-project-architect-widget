@@ -128,6 +128,8 @@ export default function ProjectDashboard({ projectId }: ProjectDashboardProps) {
   const handleAnalyze = async () => {
     console.log('Starting analysis request...');
     setIsLoading(true);
+    setAnalysisStatus('ANALYZING'); // Optimistic update - triggers polling immediately
+
     try {
       const response = await fetch(`/widget/api/workflow/projects/${projectId}/analyze`, {
         method: 'POST',
@@ -136,23 +138,20 @@ export default function ProjectDashboard({ projectId }: ProjectDashboardProps) {
       });
 
       if (response.ok) {
-        console.log('Analysis request successful, fetching updated status...');
+        console.log('Analysis request successful, polling will handle status updates...');
 
         // Deduct credits for analysis CREATION (not completion)
         console.log('💳 Triggering credit deduction for codebase analysis creation');
         parentComm.signalWorkComplete('codebase-analysis', 1);
 
-        await fetchProjectData(true); // Skip loading update, let status control it
-
-        // Only turn off loading if analysis didn't start
-        if (analysisStatus !== 'ANALYZING') {
-          setIsLoading(false);
-        }
+        // Don't fetch immediately - let polling handle it (first poll at 3 seconds)
+        // This prevents race conditions and loading overlay flickering
       } else {
         throw new Error('Failed to start analysis');
       }
     } catch (error) {
       console.error('Failed to analyze:', error);
+      setAnalysisStatus('FAILED'); // Revert optimistic update on error
       setIsLoading(false); // Only turn off loading on error
     }
   };
