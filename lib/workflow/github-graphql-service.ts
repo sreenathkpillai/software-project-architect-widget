@@ -1,6 +1,8 @@
 import { graphql } from '@octokit/graphql';
 import { GitHubFileContent, GitHubRepoMetadata, AnalysisProgress } from './github-analysis-service';
 import { RepositoryInfo, FileInfo } from './git-service';
+import { SmartFileAnalyzer } from './smart-file-analyzer';
+import { ProfessionalCodebaseAnalyzer } from './professional-codebase-analyzer';
 
 interface GraphQLRateLimit {
   limit: number;
@@ -60,6 +62,7 @@ export class GitHubGraphQLService {
     files: FileInfo[];
     fileContents: GitHubFileContent[];
     metadata: GitHubRepoMetadata;
+    professionalAnalysis: any;
   }> {
     try {
       const { owner, repo } = this.parseRepositoryUrl(repoUrl);
@@ -110,14 +113,33 @@ export class GitHubGraphQLService {
       // Get file list from tree
       const allFiles = this.extractFilesFromTree(repoData.repository.defaultBranchRef?.target?.tree);
 
-      // Select important files
-      const selectedFiles = this.selectImportantFiles(allFiles);
+      // Extract pre-analysis data from the repository response
+      const preAnalysis = {
+        packageJson: repoData.repository?.packageJson?.text ?
+          JSON.parse(repoData.repository.packageJson.text) : null,
+        readmeContent: repoData.repository?.readme?.text ||
+          repoData.repository?.readmeTxt?.text ||
+          repoData.repository?.readmeRst?.text
+      };
+
+      // Use smart file analyzer to select important files (back to original approach)
+      const { selectedFiles: smartSelectedFiles, analysis: projectAnalysis } =
+        SmartFileAnalyzer.selectImportantFiles(allFiles, preAnalysis);
+
+      console.log('🧠 Smart Analysis Results:', {
+        frameworks: projectAnalysis.frameworks.map(f => `${f.framework} (${f.confidence}%)`),
+        projectType: projectAnalysis.projectType,
+        language: projectAnalysis.language,
+        architecture: projectAnalysis.architecture,
+        selectedFileCount: smartSelectedFiles.length,
+        entryPoints: projectAnalysis.entryPoints
+      });
 
       onProgress?.({
         stage: 'fetching_contents',
         progress: 50,
-        message: `Fetching contents of ${selectedFiles.length} key files...`,
-        totalFiles: selectedFiles.length
+        message: `Fetching contents of ${smartSelectedFiles.length} intelligently selected files...`,
+        totalFiles: smartSelectedFiles.length
       });
 
       // Fetch file contents in batches using GraphQL
@@ -125,17 +147,40 @@ export class GitHubGraphQLService {
         client,
         owner,
         repo,
-        selectedFiles,
+        smartSelectedFiles,
         (processed) => {
           onProgress?.({
             stage: 'fetching_contents',
-            progress: 50 + (processed / selectedFiles.length) * 35,
-            message: `Fetching file contents... (${processed}/${selectedFiles.length})`,
+            progress: 50 + (processed / smartSelectedFiles.length) * 35,
+            message: `Fetching file contents... (${processed}/${smartSelectedFiles.length})`,
             filesProcessed: processed,
-            totalFiles: selectedFiles.length
+            totalFiles: smartSelectedFiles.length
           });
         }
       );
+
+      onProgress?.({
+        stage: 'professional_analysis',
+        progress: 85,
+        message: 'Running professional analysis with file contents...'
+      });
+
+      // NOW run professional analysis with actual file contents
+      let professionalAnalysis = null;
+      try {
+        professionalAnalysis = await ProfessionalCodebaseAnalyzer.analyzeCodebase(
+          smartSelectedFiles,
+          fileContents.map(f => ({ path: f.path, content: f.content })),
+          preAnalysis?.packageJson
+        );
+        console.log('🔬 Professional Analysis Complete:', {
+          frameworks: professionalAnalysis.frameworks.length,
+          securityIssues: professionalAnalysis.security.issues.length,
+          performanceIssues: professionalAnalysis.performance.issues.length
+        });
+      } catch (error) {
+        console.warn('Professional analysis failed, continuing with basic analysis:', error);
+      }
 
       onProgress?.({
         stage: 'generating_analysis',
@@ -145,7 +190,7 @@ export class GitHubGraphQLService {
 
       // Convert to expected format
       const repoInfo = this.convertToRepositoryInfo(metadata, repoData);
-      const files = this.convertToFileInfo(selectedFiles);
+      const files = this.convertToFileInfo(smartSelectedFiles);
 
       onProgress?.({
         stage: 'completed',
@@ -157,7 +202,8 @@ export class GitHubGraphQLService {
         repoInfo,
         files,
         fileContents,
-        metadata
+        metadata,
+        professionalAnalysis
       };
 
     } catch (error) {
@@ -313,7 +359,7 @@ export class GitHubGraphQLService {
     onProgress?: (processed: number) => void
   ): Promise<GitHubFileContent[]> {
     const contents: GitHubFileContent[] = [];
-    const batchSize = 10; // Fetch 10 files per query
+    const batchSize = 15; // Increased to fetch 15 files per query for better analysis
 
     // Add pre-fetched critical files from initial query
     const preFetchedPaths = [
@@ -364,7 +410,7 @@ export class GitHubGraphQLService {
           if (fileData?.text) {
             contents.push({
               path: file.path,
-              content: fileData.text.substring(0, 5000), // Limit content size
+              content: fileData.text.substring(0, 8000), // Increased to 8000 chars for better analysis
               size: fileData.byteSize || 0,
               encoding: 'utf-8'
             });
@@ -481,7 +527,8 @@ export class GitHubGraphQLService {
       return;
     }
 
-    console.log(`GitHub GraphQL API - Remaining: ${rateLimit.remaining}/${rateLimit.limit}, Cost: ${rateLimit.cost}, Reset: ${rateLimit.resetAt}`);
+    const used = rateLimit.limit - rateLimit.remaining;
+    console.log(`GitHub GraphQL API - Used: ${used}/${rateLimit.limit} (${rateLimit.remaining} remaining), Cost: ${rateLimit.cost}, Reset: ${rateLimit.resetAt}`);
 
     if (rateLimit.remaining < this.rateLimitBuffer) {
       const resetTime = new Date(rateLimit.resetAt);

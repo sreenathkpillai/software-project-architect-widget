@@ -92,6 +92,11 @@ export class WorkflowAnalysisService {
 
       let analysisResult: AnalysisResult;
       let markdownContent: string;
+      let repoInfo: RepositoryInfo;
+      let files: FileInfo[] = [];
+      let fileContents: GitHubFileContent[] = [];
+      let metadata: GitHubRepoMetadata = {} as GitHubRepoMetadata;
+      let professionalAnalysis: any = null;
 
       if (isGitHubRepo) {
         // Use GitHub API approach for GitHub repositories
@@ -101,6 +106,7 @@ export class WorkflowAnalysisService {
         let files: FileInfo[];
         let fileContents: GitHubFileContent[];
         let metadata: GitHubRepoMetadata;
+        let professionalAnalysis: any = null;
 
         // Try GraphQL first (more efficient), fallback to REST API
         const token = project.githubToken || process.env.GITHUB_TOKEN || process.env.GITHUB_APP_TOKEN;
@@ -151,6 +157,7 @@ export class WorkflowAnalysisService {
             files = graphqlResult.files;
             fileContents = graphqlResult.fileContents;
             metadata = graphqlResult.metadata;
+            professionalAnalysis = graphqlResult.professionalAnalysis;
           } else {
             throw new Error('Using REST API due to rate limits or configuration');
           }
@@ -191,8 +198,13 @@ export class WorkflowAnalysisService {
           metadata = restResult.metadata;
         }
 
-        // Generate analysis using GitHub API data
-        analysisResult = await this.generateCompactedAnalysisFromGitHub(fileContents, repoInfo, metadata);
+        // Generate analysis using GitHub API data and professional analysis if available
+        analysisResult = await this.generateCompactedAnalysisFromGitHub(
+          fileContents,
+          repoInfo,
+          metadata,
+          professionalAnalysis
+        );
 
         // Format as markdown
         markdownContent = this.formatAnalysisAsMarkdown(analysisResult, project.name);
@@ -209,8 +221,8 @@ export class WorkflowAnalysisService {
         );
 
         // Get repository info and files using git service
-        const repoInfo = await this.gitService.getRepositoryInfo(repoPath);
-        const files = await this.gitService.getFileStructure(repoPath);
+        repoInfo = await this.gitService.getRepositoryInfo(repoPath);
+        files = await this.gitService.getFileStructure(repoPath);
 
         // Generate analysis using local files
         analysisResult = await this.generateCompactedAnalysis(repoPath, files, repoInfo);
@@ -218,9 +230,22 @@ export class WorkflowAnalysisService {
         // Format as markdown
         markdownContent = this.formatAnalysisAsMarkdown(analysisResult, project.name);
 
+        // Set empty defaults for variables not available in local analysis
+        fileContents = [];
+        metadata = {} as GitHubRepoMetadata;
+        professionalAnalysis = null;
+
         // Cleanup temporary files
         await this.gitService.cleanupRepository(projectId);
       }
+
+      // Generate refinement questions based on analysis context
+      const refinementQuestions = this.generateRefinementQuestions(
+        files,
+        fileContents || [],
+        metadata || {} as GitHubRepoMetadata,
+        professionalAnalysis || analysisResult
+      );
 
       // Save analysis to database
       await prisma.workflowCodebaseAnalysis.upsert({
@@ -228,12 +253,14 @@ export class WorkflowAnalysisService {
         update: {
           content: markdownContent,
           version: { increment: 1 },
-          updatedAt: new Date()
+          updatedAt: new Date(),
+          refinementQuestions: JSON.stringify(refinementQuestions)
         },
         create: {
           projectId,
           content: markdownContent,
-          version: 1
+          version: 1,
+          refinementQuestions: JSON.stringify(refinementQuestions)
         }
       });
 
@@ -474,17 +501,41 @@ export class WorkflowAnalysisService {
   private async generateCompactedAnalysisFromGitHub(
     fileContents: GitHubFileContent[],
     repoInfo: RepositoryInfo,
-    metadata: GitHubRepoMetadata
+    metadata: GitHubRepoMetadata,
+    professionalAnalysis?: any
   ): Promise<AnalysisResult> {
     try {
       // Extract README content from file contents
       const readmeContent = this.extractReadmeFromContents(fileContents);
 
-      // Detect tech stack from GitHub metadata and file contents
-      const techStack = await this.detectTechStackFromGitHub(fileContents, metadata, readmeContent);
+      // Use professional analysis tech stack if available, otherwise detect from GitHub data
+      let techStack: any;
+      if (professionalAnalysis) {
+        techStack = {
+          language: professionalAnalysis.primaryLanguage,
+          framework: professionalAnalysis.frameworks[0]?.name || 'Unknown',
+          frameworks: professionalAnalysis.frameworks,
+          projectType: professionalAnalysis.projectType,
+          architecture: professionalAnalysis.architecture.patterns,
+          frontend: [],
+          backend: [],
+          database: []
+        };
+        console.log('🔬 Using professional analysis tech stack:', techStack);
+      } else {
+        techStack = await this.detectTechStackFromGitHub(fileContents, metadata, readmeContent);
+        console.log('🔍 Using detected tech stack:', techStack);
+      }
 
-      // Create enhanced analysis prompt for GitHub data
-      const prompt = this.createEnhancedAnalysisPromptFromGitHub(repoInfo, techStack, fileContents, readmeContent, metadata);
+      // Create enhanced analysis prompt with professional insights if available
+      const prompt = this.createEnhancedAnalysisPromptFromGitHub(
+        repoInfo,
+        techStack,
+        fileContents,
+        readmeContent,
+        metadata,
+        professionalAnalysis
+      );
 
       // Call AI service
       let aiAnalysis: any;
@@ -772,13 +823,13 @@ Generate a comprehensive analysis using this EXACT markdown structure:
 
 ## 🛠 Technology Stack
 ### Frontend
-${techStack.frontend.length > 0 ? techStack.frontend.map((t: string) => `- ${t}`).join('\n') : '- [Analyze and list frontend technologies]'}
+${(techStack.frontend?.length || 0) > 0 ? techStack.frontend.map((t: string) => `- ${t}`).join('\n') : '- [Analyze and list frontend technologies]'}
 
 ### Backend
-${techStack.backend.length > 0 ? techStack.backend.map((t: string) => `- ${t}`).join('\n') : '- [Analyze and list backend technologies]'}
+${(techStack.backend?.length || 0) > 0 ? techStack.backend.map((t: string) => `- ${t}`).join('\n') : '- [Analyze and list backend technologies]'}
 
 ### Database
-${techStack.database.length > 0 ? techStack.database.map((t: string) => `- ${t}`).join('\n') : '- [Analyze and list database technologies]'}
+${(techStack.database?.length || 0) > 0 ? techStack.database.map((t: string) => `- ${t}`).join('\n') : '- [Analyze and list database technologies]'}
 
 ## 📁 Project Structure
 [Provide clear directory structure with explanations]
@@ -1308,8 +1359,8 @@ ${analysis.recommendations.map(rec => `- ${rec}`).join('\n')}
       const packageInfo = this.analyzePackageJsonContent(packageJsonFile.content);
       if (packageInfo) {
         // Merge package.json findings with README findings
-        techStack.frontend = [...new Set([...techStack.frontend, ...packageInfo.frontend])];
-        techStack.backend = [...new Set([...techStack.backend, ...packageInfo.backend])];
+        techStack.frontend = [...new Set([...(techStack.frontend || []), ...(packageInfo.frontend || [])])];
+        techStack.backend = [...new Set([...(techStack.backend || []), ...(packageInfo.backend || [])])];
 
         // Set primary framework and language if not detected from README
         if (techStack.framework === 'Unknown' || techStack.framework === metadata.language) {
@@ -1428,7 +1479,8 @@ ${analysis.recommendations.map(rec => `- ${rec}`).join('\n')}
     techStack: any,
     fileContents: GitHubFileContent[],
     readmeContent: string | null,
-    metadata: GitHubRepoMetadata
+    metadata: GitHubRepoMetadata,
+    professionalAnalysis?: any
   ): string {
     return `You are a senior software architect analyzing a codebase. Generate a comprehensive, structured analysis in markdown format.
 
@@ -1443,75 +1495,92 @@ GitHub Metadata:
 
 Detected Tech Stack: ${JSON.stringify(techStack, null, 2)}
 
-README Tech Stack:
-${readmeContent ? this.extractTechStackFromReadme(readmeContent) : 'No README found'}
+${professionalAnalysis ? `
+PROFESSIONAL ANALYSIS INSIGHTS:
+=================================
+🔬 Advanced Framework Detection:
+${professionalAnalysis.frameworks.map((f: any) => `- ${f.name}: ${f.confidence}% confidence (${f.role})`).join('\n')}
 
-Key Files Sample:
-${fileContents.slice(0, 5).map(f => `${f.path}: ${f.content.substring(0, 200)}...`).join('\n')}
+🏗 Architecture Patterns: ${professionalAnalysis.architecture?.patterns?.map((p: any) => p.name).join(', ') || 'None detected'}
+📊 Project Type: ${professionalAnalysis.projectType || 'Unknown'}
+🔧 Database Entities: ${professionalAnalysis.database?.entities?.length || 0} found
 
-Generate a comprehensive analysis using this EXACT markdown structure:
+🔒 Security Analysis (${professionalAnalysis.security?.issues?.length || 0} issues found):
+${professionalAnalysis.security?.issues?.slice(0, 3).map((issue: any) => `- ${issue.type}: ${issue.description} (${issue.severity})`).join('\n') || 'No issues detected'}
 
-# Project Analysis: ${metadata.name}
+⚡ Performance Analysis (${professionalAnalysis.performance?.issues?.length || 0} issues found):
+${professionalAnalysis.performance?.issues?.slice(0, 3).map((issue: any) => `- ${issue.type}: ${issue.description} (${issue.impact})`).join('\n') || 'No issues detected'}
 
-## 🚀 Quick Start
-- **Primary Tech Stack**: [Main technologies used]
-- **Development Commands**: [from package.json or detected patterns]
-- **Environment Setup**: [requirements and setup steps]
+📈 Code Quality - Complexity: ${professionalAnalysis.codeQuality?.complexity || 0}/100, Maintainability: ${professionalAnalysis.codeQuality?.maintainability || 0}/100
+📦 Dependencies Analysis: ${professionalAnalysis.dependencies?.production?.length || 0} production, ${professionalAnalysis.dependencies?.outdated?.length || 0} outdated
 
-## 📋 Project Overview
-- **Type**: [Web App, API, Library, etc.]
-- **Architecture**: [Monorepo, Microservices, SPA, etc.]
-- **Main Language**: [Primary programming language]
-- **Repository Stats**: ${metadata.stargazers_count} stars, ${metadata.forks_count} forks
+🤖 AI Agent Insights:
+${professionalAnalysis.insights?.aiOptimizations?.length > 0 ?
+  professionalAnalysis.insights.aiOptimizations.map((insight: any) => `- ${insight.type}: ${insight.description}`).join('\n') :
+  'No specific AI optimizations identified'}
+=================================
+` : ''}
 
-## 🛠 Technology Stack
-### Frontend
-${techStack.frontend.length > 0 ? techStack.frontend.map((t: string) => `- ${t}`).join('\n') : '- [Analyze and list frontend technologies]'}
+README Analysis:
+${readmeContent ? `
+=== README Content ===
+${readmeContent.substring(0, 1000)}...
 
-### Backend
-${techStack.backend.length > 0 ? techStack.backend.map((t: string) => `- ${t}`).join('\n') : '- [Analyze and list backend technologies]'}
+=== Detected Tech Stack from README ===
+${this.extractTechStackFromReadme(readmeContent)}
+` : 'No README found'}
 
-### Database
-${techStack.database.length > 0 ? techStack.database.map((t: string) => `- ${t}`).join('\n') : '- [Analyze and list database technologies]'}
+Key Files Sample (AI-Optimized Selection):
+${fileContents.slice(0, 12).map(f => `
+=== ${f.path} ===
+${f.content.substring(0, 500)}...
+`).join('\n')}
 
-## 📁 Project Structure
-[Provide clear directory structure with explanations]
+Generate an AI-optimized analysis using this EXACT markdown structure:
 
-## 🎯 Entry Points
-- **Main Application**: [Primary entry point file]
-- **API Routes**: [API endpoint locations]
-- **Configuration**: [Config file locations]
+# ${metadata.name} - Quick Reference
 
-## 🗺 API Routes Mapping
-[List and explain API endpoints found in the codebase]
+## Quick Start
+[List the essential commands to get this project running - be specific with paths and commands from package.json]
 
-## 📝 Key Files by Development Task
-### Adding New Features
-- Components: [Component directories]
-- Pages: [Page/route directories]
-- API: [API directories]
+## Stack
+${(techStack.frontend?.length || 0) > 0 ? `- Frontend: ${techStack.frontend.join(', ')}` : '- Frontend: [Analyze frontend tech]'}
+${(techStack.backend?.length || 0) > 0 ? `- Backend: ${techStack.backend.join(', ')}` : '- Backend: [Analyze backend tech]'}
+${(techStack.database?.length || 0) > 0 ? `- Database: ${techStack.database.join(', ')}` : '- Database: [Check for database usage]'}
+[Add ports and URLs where services run]
+
+## Project Structure
+[Show key directories with brief explanations - focus on where code lives and entry points]
+
+## Entry Points
+[List actual entry files found - where does execution start for each service/app]
+
+## Key Files by Development Task
+### Adding Features
+[Where to add components, pages, API routes - be specific with paths from the analyzed files]
 
 ### Database & Data
-- Schema: [Database schema files]
-- Migrations: [Migration directories]
+[Database files, schemas, models - or note if missing based on file analysis]
 
-## 🔧 Development Workflow
-- **Install**: [Installation command]
-- **Development**: [Dev server command]
-- **Build**: [Build command]
-- **Test**: [Test command]
+### Configuration
+[Important config files found and what they control]
 
-## 🏗 Code Patterns & Conventions
-[Identify and explain coding patterns used]
+## Environment Variables
+[List expected env vars and their purposes - check .env files and code references]
 
-## 🎯 AI Coding Context
-### For Feature Development
-[Key patterns and structures for adding features]
+## API Endpoints
+[List actual API routes found in the analyzed code - not inferred]
 
-### For Bug Fixes
-[Error handling patterns and debugging approaches]
+## Authentication Flow
+[Describe auth implementation if found - JWT, sessions, where's the logic based on files analyzed]
 
-Make the analysis practical and actionable for both human developers and AI coding assistants.`;
+## Active Services/Ports
+[What should be running on which ports - from package.json scripts and config files]
+
+## Current Issues/Notes
+[Any immediate concerns found in the code - security issues, missing configs, TODO comments, etc.]
+
+Focus on actionable information for AI coding assistants. Avoid generic recommendations and repository stats. Be specific about file paths, commands, and actual findings from the analyzed code.`;
   }
 
   /**
@@ -1661,5 +1730,227 @@ Make the analysis practical and actionable for both human developers and AI codi
         'Review performance optimizations'
       ]
     };
+  }
+
+  /**
+   * Generate contextual refinement questions based on initial analysis
+   */
+  private generateRefinementQuestions(
+    files: FileInfo[],
+    fileContents: GitHubFileContent[],
+    metadata: GitHubRepoMetadata,
+    analysisContext: any
+  ): Array<{ id: string; question: string; type: 'text' | 'choice'; choices?: string[] }> {
+    const questions: Array<{ id: string; question: string; type: 'text' | 'choice'; choices?: string[] }> = [];
+
+    // Analyze what we found vs what might be missing
+    const hasPackageJson = fileContents.some(f => f.path === 'package.json');
+    const hasCppFiles = files.some(f => /\.(cpp|c|h|hpp)$/.test(f.path));
+    const hasVisualStudio = files.some(f => /\.(sln|vcxproj)$/.test(f.path));
+    const hasMonorepoStructure = files.some(f => f.path.startsWith('apps/'));
+    const hasDatabase = fileContents.some(f => f.content.includes('database') || f.content.includes('prisma') || f.content.includes('mongoose'));
+    const frameworks = analysisContext?.frameworks || [];
+
+    // Question 1: Platform/Runtime clarification
+    if (hasCppFiles && hasVisualStudio) {
+      questions.push({
+        id: 'platform',
+        question: 'What platform does this C++ application target?',
+        type: 'choice',
+        choices: ['Windows Desktop', 'Cross-platform Console', 'Game Engine', 'System Service', 'Other']
+      });
+    } else if (hasPackageJson && hasMonorepoStructure) {
+      questions.push({
+        id: 'deployment',
+        question: 'How are the frontend/backend services typically deployed?',
+        type: 'choice',
+        choices: ['Same server/domain', 'Separate servers', 'Docker containers', 'Cloud services (Vercel/Railway)', 'Other']
+      });
+    } else if (frameworks.length === 0) {
+      questions.push({
+        id: 'tech_stack',
+        question: 'What is the primary technology stack for this project?',
+        type: 'text'
+      });
+    }
+
+    // Question 2: Entry points and main functionality
+    const mainFiles = files.filter(f => /^(main|index|app|program)\.(js|ts|cpp|c|py)$/.test(f.path));
+    if (mainFiles.length === 0) {
+      questions.push({
+        id: 'entry_points',
+        question: 'What file(s) serve as the main entry points for running this application?',
+        type: 'text'
+      });
+    } else if (mainFiles.length > 1) {
+      questions.push({
+        id: 'main_purpose',
+        question: `Found multiple entry points (${mainFiles.map(f => f.path).join(', ')}). What is the primary purpose/function of this codebase?`,
+        type: 'text'
+      });
+    }
+
+    // Question 3: Database/Data persistence
+    if (!hasDatabase && (hasPackageJson || frameworks.some((f: any) => f.framework?.includes('backend')))) {
+      questions.push({
+        id: 'database',
+        question: 'Does this application use a database? If so, which one?',
+        type: 'choice',
+        choices: ['No database', 'PostgreSQL', 'MySQL', 'SQLite', 'MongoDB', 'Redis', 'File-based storage', 'Other']
+      });
+    }
+
+    // Question 4: Development workflow
+    const hasDocker = files.some(f => f.path === 'Dockerfile' || f.path === 'docker-compose.yml');
+    const hasMakefile = files.some(f => f.path === 'Makefile' || f.path === 'CMakeLists.txt');
+
+    if (!hasPackageJson && !hasMakefile && !hasDocker) {
+      questions.push({
+        id: 'build_process',
+        question: 'How do you typically build and run this project during development?',
+        type: 'text'
+      });
+    }
+
+    // Question 5: Missing context or special configurations
+    const portsFound = fileContents.some(f => /port.*\d{4}/.test(f.content.toLowerCase()));
+    if (hasMonorepoStructure && !portsFound) {
+      questions.push({
+        id: 'ports_services',
+        question: 'What ports do the different services run on? (e.g., frontend:3000, backend:3001)',
+        type: 'text'
+      });
+    } else if (hasCppFiles) {
+      questions.push({
+        id: 'build_dependencies',
+        question: 'Are there any external libraries or dependencies required to build this C++ project?',
+        type: 'text'
+      });
+    }
+
+    // Limit to 5 questions max
+    return questions.slice(0, 5);
+  }
+
+  /**
+   * Refine existing analysis based on user answers to questions
+   */
+  async refineAnalysis(projectId: string, externalId: string, answers: Record<string, string>): Promise<void> {
+    try {
+      // Update project status to analyzing
+      await prisma.workflowProject.update({
+        where: { id: projectId },
+        data: { analysisStatus: 'ANALYZING' }
+      });
+
+      // Get project details
+      const project = await prisma.workflowProject.findUnique({
+        where: { id: projectId }
+      });
+
+      if (!project || project.externalId !== externalId) {
+        throw new Error('Project not found');
+      }
+
+      // Get existing analysis
+      const existingAnalysis = await prisma.workflowCodebaseAnalysis.findUnique({
+        where: { projectId }
+      });
+
+      if (!existingAnalysis) {
+        throw new Error('No existing analysis found');
+      }
+
+      // Get the original analysis questions
+      let questions = [];
+      if (existingAnalysis.refinementQuestions) {
+        try {
+          questions = JSON.parse(existingAnalysis.refinementQuestions);
+        } catch (error) {
+          console.error('Failed to parse refinement questions:', error);
+        }
+      }
+
+      // Create refined analysis prompt with answers
+      const refinementPrompt = this.createRefinementPrompt(
+        existingAnalysis.content,
+        questions,
+        answers,
+        project.name
+      );
+
+      // Call AI service to generate refined analysis
+      let refinedAnalysis: string;
+      if (AI_PROVIDER === 'claude') {
+        refinedAnalysis = await this.callClaudeForAnalysis(refinementPrompt);
+      } else {
+        refinedAnalysis = await this.callOpenAIForAnalysis(refinementPrompt);
+      }
+
+      // Update analysis in database
+      await prisma.workflowCodebaseAnalysis.update({
+        where: { projectId },
+        data: {
+          content: refinedAnalysis,
+          version: { increment: 1 },
+          updatedAt: new Date()
+        }
+      });
+
+      // Update project status
+      await prisma.workflowProject.update({
+        where: { id: projectId },
+        data: { analysisStatus: 'COMPLETED' }
+      });
+
+    } catch (error) {
+      console.error('Refinement error:', error);
+
+      // Update project status to failed
+      await prisma.workflowProject.update({
+        where: { id: projectId },
+        data: {
+          analysisStatus: 'FAILED',
+          updatedAt: new Date()
+        }
+      });
+
+      throw error;
+    }
+  }
+
+  /**
+   * Create refinement prompt with user answers
+   */
+  private createRefinementPrompt(
+    originalAnalysis: string,
+    questions: Array<{ id: string; question: string; type: string; choices?: string[] }>,
+    answers: Record<string, string>,
+    projectName: string
+  ): string {
+    // Extract answered questions
+    const answeredQuestions = questions
+      .filter(q => answers[q.id] && answers[q.id].trim() !== '' && answers[q.id] !== 'I don\'t know')
+      .map(q => `Q: ${q.question}\nA: ${answers[q.id]}`)
+      .join('\n\n');
+
+    return `You are refining a codebase analysis based on additional user context.
+
+ORIGINAL ANALYSIS:
+${originalAnalysis}
+
+ADDITIONAL CONTEXT FROM USER:
+${answeredQuestions || 'No additional context provided - user answered "I don\'t know" to all questions.'}
+
+Please generate a refined analysis using the SAME markdown structure as the original, but incorporate the additional context provided by the user. Focus on:
+
+1. Updating the Stack section with clarified technologies/platforms
+2. Enhancing the Quick Start commands with user-provided build/run instructions
+3. Improving Entry Points section with confirmed main files
+4. Adding accurate Port/Service information if provided
+5. Updating Database section with confirmed database info
+6. Refining Current Issues/Notes based on new context
+
+Keep the same "${projectName} - Quick Reference" format. If the user provided no useful context, make minimal changes but ensure the analysis remains accurate and helpful.`;
   }
 }

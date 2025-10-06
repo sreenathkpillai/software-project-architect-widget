@@ -1,6 +1,14 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   basePath: '/widget',
+  webpack: (config) => {
+    // Suppress punycode deprecation warnings
+    config.ignoreWarnings = [
+      { module: /node_modules\/punycode/ },
+      /Critical dependency: the request of a dependency is an expression/
+    ];
+    return config;
+  },
   // Allow iframe embedding
   async headers() {
     return [

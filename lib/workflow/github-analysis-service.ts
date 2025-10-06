@@ -1,5 +1,6 @@
 import { Octokit } from '@octokit/rest';
 import { RepositoryInfo, FileInfo } from './git-service';
+import { SmartFileAnalyzer } from './smart-file-analyzer';
 
 export interface GitHubFileContent {
   path: string;
@@ -34,11 +35,12 @@ export interface GitHubTreeItem {
 }
 
 export interface AnalysisProgress {
-  stage: 'fetching_metadata' | 'fetching_tree' | 'selecting_files' | 'fetching_contents' | 'generating_analysis' | 'completed';
+  stage: 'fetching_metadata' | 'fetching_tree' | 'selecting_files' | 'professional_analysis' | 'fetching_contents' | 'generating_analysis' | 'completed';
   progress: number;
   message: string;
   filesProcessed?: number;
   totalFiles?: number;
+  analysis?: any; // Professional analysis results
 }
 
 export class GitHubAnalysisService {

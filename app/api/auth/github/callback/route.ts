@@ -71,10 +71,19 @@ export async function GET(request: NextRequest) {
             // Store auth data for parent window to pick up
             localStorage.setItem('github_auth_result', JSON.stringify(${JSON.stringify(authData)}));
 
-            // Also try to save to database if project ID is available
-            const projectId = localStorage.getItem('github_oauth_project');
-            const externalId = localStorage.getItem('workflow_external_id');
-            if (projectId && externalId) {
+            // Get project info from OAuth state parameter
+            console.log('🔍 Raw state parameter:', ${JSON.stringify(state)});
+
+            try {
+              const stateData = JSON.parse(${JSON.stringify(state)});
+              console.log('🔍 Parsed state data:', stateData);
+
+              const projectId = stateData.projectId;
+              const externalId = stateData.externalId;
+              console.log('🔍 Extracted values:', { projectId, externalId });
+
+              if (projectId && externalId) {
+                console.log('✅ Making API call to save token to database...');
               // Make API call to save token to database
               fetch('/widget/api/workflow/projects/' + projectId + '/connect', {
                 method: 'POST',
@@ -84,7 +93,8 @@ export async function GET(request: NextRequest) {
                 body: JSON.stringify({
                   githubToken: ${JSON.stringify(tokenData.access_token)},
                   username: ${JSON.stringify(userData.login)},
-                  externalId: externalId
+                  externalId: externalId,
+                  repositoryUrl: stateData.repositoryUrl
                 })
               }).then(response => {
                 if (response.ok) {
@@ -95,6 +105,11 @@ export async function GET(request: NextRequest) {
               }).catch(error => {
                 console.error('Error saving GitHub token:', error);
               });
+            } else {
+              console.error('❌ Missing projectId or externalId:', { projectId, externalId });
+            }
+            } catch (error) {
+              console.error('❌ Error parsing state data:', error);
             }
 
             // Also try to notify parent window directly
@@ -105,7 +120,7 @@ export async function GET(request: NextRequest) {
               }, window.location.origin);
             }
 
-            // Close popup after a brief delay
+            // Close popup after authentication
             setTimeout(() => window.close(), 1000);
           </script>
           <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; text-align: center; padding: 50px;">

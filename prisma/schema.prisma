@@ -269,12 +269,13 @@ model WorkflowProject {
 }
 
 model WorkflowCodebaseAnalysis {
-  id              String   @id @default(cuid())
-  projectId       String   @unique
-  content         String   @db.Text // Markdown content
-  version         Int      @default(1)
-  analyzedAt      DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                   String   @id @default(cuid())
+  projectId            String   @unique
+  content              String   @db.Text // Markdown content
+  refinementQuestions  String?  @db.Text // JSON array of refinement questions
+  version              Int      @default(1)
+  analyzedAt           DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   project         WorkflowProject  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 

@@ -404,6 +404,7 @@ export default function RepositoryConnector({ projectId, project, onClose, onCon
               ) : (
                 <GitHubAuthStatus
                   projectId={projectId}
+                  repositoryUrl={formData.repositoryUrl}
                   onSwitchAccount={() => {
                     // Reset local state after switching
                     setGithubAuth({ isAuthenticated: false, username: '', token: '' });

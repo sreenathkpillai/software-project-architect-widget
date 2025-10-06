@@ -7,9 +7,10 @@ interface GitHubAuthStatusProps {
   onSwitchAccount?: () => void;
   compact?: boolean; // For different display modes
   projectId?: string; // For triggering auth flow
+  repositoryUrl?: string; // Repository URL to connect
 }
 
-export default function GitHubAuthStatus({ onSwitchAccount, compact = false, projectId }: GitHubAuthStatusProps) {
+export default function GitHubAuthStatus({ onSwitchAccount, compact = false, projectId, repositoryUrl }: GitHubAuthStatusProps) {
   const { externalId } = useWorkflow();
   const [githubAuth, setGithubAuth] = useState({
     isAuthenticated: false,
@@ -81,7 +82,12 @@ export default function GitHubAuthStatus({ onSwitchAccount, compact = false, pro
 
     const scope = 'repo';
     const redirectUri = `${window.location.origin}/widget/api/auth/github/callback`;
-    const state = Math.random().toString(36).substring(7);
+    const state = JSON.stringify({
+      random: Math.random().toString(36).substring(7),
+      projectId: projectId,
+      externalId: externalId,
+      repositoryUrl: repositoryUrl
+    });
 
     // Store state for verification
     localStorage.setItem('github_oauth_state', state);

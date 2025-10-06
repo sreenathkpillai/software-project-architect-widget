@@ -225,7 +225,7 @@ export default function ProjectDashboard({ projectId }: ProjectDashboardProps) {
             </div>
             {/* Show GitHub auth status only when repository is connected and it's a GitHub repo */}
             {isRepositoryConnected && project.repositoryUrl?.includes('github.com') && (
-              <GitHubAuthStatus compact={true} projectId={projectId} />
+              <GitHubAuthStatus compact={true} projectId={projectId} repositoryUrl={project.repositoryUrl} />
             )}
           </div>
         </div>
