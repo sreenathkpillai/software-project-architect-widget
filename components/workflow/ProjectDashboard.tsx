@@ -127,8 +127,7 @@ export default function ProjectDashboard({ projectId }: ProjectDashboardProps) {
 
   const handleAnalyze = async () => {
     console.log('Starting analysis request...');
-    setIsLoading(true);
-    setAnalysisStatus('ANALYZING'); // Optimistic update - triggers polling immediately
+    setAnalysisStatus('ANALYZING'); // Optimistic update - triggers polling and shows loading in CodebaseAnalyzer
 
     try {
       const response = await fetch(`/widget/api/workflow/projects/${projectId}/analyze`, {
@@ -152,7 +151,6 @@ export default function ProjectDashboard({ projectId }: ProjectDashboardProps) {
     } catch (error) {
       console.error('Failed to analyze:', error);
       setAnalysisStatus('FAILED'); // Revert optimistic update on error
-      setIsLoading(false); // Only turn off loading on error
     }
   };
 
