@@ -2,6 +2,16 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Shimmer animation for progress bar */
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.animate-shimmer {
+  animation: shimmer 2s infinite;
+}
+
 /* Widget Theme Variables */
 :root {
   --widget-primary-color: #3B82F6;

@@ -3,6 +3,8 @@ import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { prisma } from '@/lib/db';
 import { v4 as uuidv4 } from 'uuid';
+import { extractFinalizeInner, parseFinalize, FinalizeError } from '@/lib/finalize/parse';
+import { fanOutDocGeneration } from '@/lib/runtime/fanout';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -71,7 +73,7 @@ const tools = [
   }
 ];
 
-const SYSTEM_PROMPT = `# Unified Project Planning Assistant (CSA + SPA)
+const FULL_SYSTEM_PROMPT = `# Unified Project Planning Assistant (CSA + SPA)
 
 ## Role
 You are a **Technical Project Planning Assistant & Senior Developer** (20+ yrs experience). Guide the user through 13 specific document steps, one at a time, to produce actionable project specifications.
@@ -180,6 +182,129 @@ State: Zustand, React Query
 CI/CD: GitHub Actions, Vercel
 
 Keep responses concise, use bullets over paragraphs.`;
+
+const SYSTEM_PROMPT = `# Unified Project Planning Assistant (CSA + SPA)
+
+## Document Generation Mode Override (for orchestration)
+If the **latest user message** begins with:
+  \`# DOCUMENT GENERATION MODE\`
+and includes a line:
+  \`documentType: <one of the 13>\`
+then **stop asking questions** and **generate that document only** via a single \`save_specification_document\` tool call (include \`skip_technical_summary=true\`). Otherwise, operate in interrogation mode.
+
+## Role
+You are a **Technical Project Planning Assistant & Senior Developer** (20+ yrs experience). Guide the user through 13 specific document steps by collecting answers via questions. **Do not generate documents unless the Document Generation Mode Override is present.**
+
+## CRITICAL WORKFLOW REQUIREMENTS — DOCUMENT GENERATION MODE ONLY
+(Apply these ONLY when \`# DOCUMENT GENERATION MODE\` override is active.)
+1. **MANDATORY DOCUMENT CREATION**: Generate the specification document via \`save_specification_document\` for the requested \`documentType\`.
+2. **NO EXTRA CONTENT**: Output a single tool call containing the entire document; include \`skip_technical_summary=true\`.
+3. **GAP HANDLING**: Use session answers; where gaps exist, fill with stable defaults by priority: user answers → project type → audience → industry standards.
+
+## Scope Rules & Timeline Context
+- Use the timeline parameter to inform scope and technology choices
+- Timeline values: 1=2 days, 2=1 week, 3=2 weeks, 4=1 month, 5=6 weeks, 6=2 months, 7=10 weeks, 8=3 months, 9=4 months, 10=12 weeks
+- Adjust complexity, features, and technology choices based on timeline without mentioning specific timeframes to users
+- Shorter timelines (1-3): Simple MVP, proven tech, minimal features
+- Medium timelines (4-6): Feature-complete product, some advanced features
+- Longer timelines (7-10): Full platform, enterprise features, custom solutions
+
+## Interaction Style (Interrogation Mode)
+- **Ask EXACTLY ONE question at a time** (the message must contain **at most one "?"**; do not bundle or add follow-ups)
+- **Always provide A-C options** (or A-B if only 2 good options) based on context + "Or specify something different if you'd like"
+- **Reason out best options** for each question based on project context and industry standards
+- **Aim for 3 questions per document, never exceed 5 questions**
+- If user is **decisive** → ask follow-ups efficiently, but never in the same message
+- If user is **unsure** → give clear contextual A-C options to help them choose
+- Use concrete, actionable wording
+- Never mention document types, PRDs, or internal workflow to users
+
+## Technical Decisions Mode
+- **When techDecisions=true**: Only ask product/business uncertainty questions, auto-decide all tech stack
+- **When techDecisions=false**: Balance tech + product questions based on uncertainty
+- **Technical defaults to use when techDecisions=true**: React Native + Expo, Node.js + TypeScript, PostgreSQL + Prisma, Zustand + React Query, JWT auth, Vercel/Fly.io deployment
+
+## Fast Mode & Question Selection
+
+### Question Selection Algorithm:
+1. **Generate ALL potential questions** for current document type
+2. **Score uncertainty** (1-10 scale) where 10 = most uncertain, requires user input
+3. **Sort by uncertainty DESC** and take exactly top N questions based on document type
+4. **Tie-breaking**: Simple truncation - if multiple questions have same score, take first N in sorted list
+5. **Ask selected questions** to user
+6. **Make background decisions** for all remaining questions using project context
+7. **(Document generation happens ONLY when override is present.)**
+
+### Mode Behaviors & Question Limits:
+- **Fast Mode ON**: Variable limits per document type - PRD(5), Frontend(3), Backend(3), State Management(1), Database(3), API(2), DevOps(2), User Flow(3), README(2), Testing/Docs/Performance/Libraries(1 each)
+- **Fast Mode OFF**: Hard limit of 6 questions per document, background decisions for rest
+
+### Uncertainty Scoring Criteria:
+- **High (9-10)**: Core product features, target audience, monetization, unique value prop
+- **Medium (6-8)**: Platform choice, architectural patterns, UI frameworks
+- **Low (1-5)**: Code style, file structure, deployment details, testing tools
+
+### Background Decision Making (Fast Mode):
+When you reach question limits, make intelligent defaults for remaining decisions:
+
+#### Decision Sources (in priority order):
+1. **User context**: Answers from previous questions in this session
+2. **Project type**: Mobile game → mobile-optimized choices
+3. **Audience**: Casual gamers → simple, accessible options  
+4. **Timeline**: 2-day MVP → proven, simple technology choices
+5. **Industry standards**: Well-established patterns for similar projects
+
+#### Examples:
+- If building mobile game for casual audience → choose simple UI patterns, single-finger controls
+- If 2-day timeline → choose proven tech stack (React Native + Expo, not experimental frameworks)
+- If target is "quick matches" → choose fast loading, minimal setup options
+
+### Question Categories:
+**Product Questions**: Target audience, features, user flows, monetization, design style
+**Tech Questions**: Frameworks, databases, deployment, testing tools, code organization
+
+## Internal Document Flow (13 steps - DO NOT MENTION TO USERS):
+1. **prd.md** — Name, audience, goals, features (MSC), risks, out-of-scope
+2. **frontend.md** — UI stack, nav, styling, components, state usage
+3. **backend.md** — Architecture, DB schema, auth, API, integrations
+4. **state-management.md** — Local/global rules, persistence, invalidations
+5. **database-schema.md** — ERD, tables/fields, indexes, migrations
+6. **api.md** — Endpoints, payloads, error handling, rate limits
+7. **devops.md** — Environments, pipelines, infra, scaling
+8. **testingplan.md** — Test types, tools, coverage targets
+9. **codedocumentation.md** — Repo structure, style, API docs
+10. **performanceoptimization.md** — Frontend budgets, backend SLAs, caching
+11. **userflow.md** — Mermaid diagrams for core flows, roles
+12. **thirdpartylibraries.md** — Libs/services, licenses, integration
+13. **readme.md** — Project summary, stack, quickstart
+
+## Response Pattern (Interrogation Mode)
+- **One Question**: Ask ONE focused question with A-C options (+ "or specify something different")
+- **Gather Info**: Continue asking single questions until you meet the per-document question limit
+- **Do NOT create documents in this mode**
+- **CRITICAL**: NEVER output JSON or tool parameters in your response text
+- Keep responses concise and focused on getting information needed
+
+## Tech Defaults (suggest when user is unsure):
+Mobile: React Native + TS + Expo
+Backend: Node.js + TS, REST first  
+DB: Postgres + Prisma
+Auth: JWT + refresh tokens
+State: Zustand, React Query
+CI/CD: GitHub Actions, Vercel
+
+Keep responses concise, use bullets over paragraphs.
+
+---
+
+## End-of-Interrogation Signal (FINALIZE)
+When **all 13 documents** have reached their question targets, output **only** the block below and nothing else, then stop:
+
+===FINALIZE===
+mode: parallel
+docs: ["prd.md","frontend.md","backend.md","state-management.md","database-schema.md","api.md","devops.md","testingplan.md","codedocumentation.md","performanceoptimization.md","userflow.md","thirdpartylibraries.md","readme.md"]
+notes: "Orchestrator: start 13 parallel document-generation calls now. Use the latest session context as authoritative (latest mention wins)."
+===/FINALIZE===`;
 
 // Convert OpenAI tools format to Claude format
 const claudeTools = [
@@ -462,6 +587,87 @@ function getSpecificQuestionForDocType(docType: string): string {
 async function handleOpenAIRequest(messages: any[], contextualPrompt: string, userSession: string, techDecisions = false, fastMode = false, timeline = 1, externalId = 'sreeveTest123', contextualIntroBrief?: any) {
   const response = await callOpenAI(messages, contextualPrompt);
   const responseMessage = response.choices[0].message;
+  const responseText = responseMessage.content || '';
+
+  // Check for FINALIZE block
+  const finalizeInner = extractFinalizeInner(responseText);
+  if (finalizeInner) {
+    try {
+      const finalizeBlock = parseFinalize(finalizeInner);
+
+      // Get full conversation transcript for document generation
+      const transcript = messages.map((msg: any) =>
+        `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`
+      ).join('\n\n');
+
+      // Start parallel document generation
+      console.log('🚀 Starting parallel document generation for:', finalizeBlock.docs);
+
+      const results = await fanOutDocGeneration(
+        {
+          docs: finalizeBlock.docs,
+          transcript
+        },
+        {
+          openai,
+          systemPrompt: SYSTEM_PROMPT, // Use the unified prompt
+          model: process.env.OPENAI_DOC_MODEL || 'gpt-5',
+          concurrency: 5,
+          temperature: 0.2,
+          top_p: 0.95,
+          max_tokens: 3300
+        }
+      );
+
+      console.log('✅ Parallel document generation completed');
+
+      // Process results and save successful documents
+      const successes = [];
+      const failures = [];
+
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          const docResult = result.value;
+          // Extract tool call arguments and save to database
+          const toolCall = docResult.raw.choices[0].message.tool_calls[0];
+          const args = JSON.parse(toolCall.function.arguments);
+
+          try {
+            await saveSpecificationDocument(
+              args.filename,
+              args.content,
+              args.description,
+              args.document_type,
+              args.next_steps,
+              true, // skip_technical_summary
+              userSession,
+              externalId
+            );
+            successes.push(docResult.documentType);
+          } catch (saveError) {
+            console.error(`Failed to save ${docResult.documentType}:`, saveError);
+            failures.push(docResult.documentType);
+          }
+        } else {
+          console.error('Document generation failed:', result.reason);
+          // Extract document type from the error context if possible
+          failures.push('unknown');
+        }
+      }
+
+      return NextResponse.json({
+        text: `🎉 **All Documents Generated!** Successfully created ${successes.length} documents in parallel.\n\n**Generated:** ${successes.join(', ')}\n\n${failures.length > 0 ? `**Failed:** ${failures.join(', ')}\n\n` : ''}Your complete project specification is ready!`,
+        provider: 'openai-parallel',
+        documentsGenerated: successes.length,
+        documentsFailed: failures.length,
+        usage: response.usage
+      });
+
+    } catch (error: any) {
+      console.error('FINALIZE processing error:', error?.message);
+      // Fall through to normal processing if FINALIZE parsing fails
+    }
+  }
 
   // Check if OpenAI wants to call a function
   if (responseMessage.tool_calls) {
@@ -656,7 +862,90 @@ async function handleOpenAIRequest(messages: any[], contextualPrompt: string, us
 // Handler for Claude requests
 async function handleClaudeRequest(messages: any[], contextualPrompt: string, userSession: string, techDecisions = false, fastMode = false, timeline = 1, externalId = 'sreeveTest123', contextualIntroBrief?: any) {
   const response = await callClaude(messages, contextualPrompt);
-  
+
+  // Extract text content from Claude response
+  const textContent = response.content.find((content: any) => content.type === 'text') as any;
+  const responseText = textContent?.text || '';
+
+  // Check for FINALIZE block
+  const finalizeInner = extractFinalizeInner(responseText);
+  if (finalizeInner) {
+    try {
+      const finalizeBlock = parseFinalize(finalizeInner);
+
+      // Get full conversation transcript for document generation
+      const transcript = messages.map((msg: any) =>
+        `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`
+      ).join('\n\n');
+
+      // Start parallel document generation
+      console.log('🚀 Starting parallel document generation for:', finalizeBlock.docs);
+
+      const results = await fanOutDocGeneration(
+        {
+          docs: finalizeBlock.docs,
+          transcript
+        },
+        {
+          openai,
+          systemPrompt: SYSTEM_PROMPT, // Use the unified prompt
+          model: process.env.OPENAI_DOC_MODEL || 'gpt-5',
+          concurrency: 5,
+          temperature: 0.2,
+          top_p: 0.95,
+          max_tokens: 3300
+        }
+      );
+
+      console.log('✅ Parallel document generation completed');
+
+      // Process results and save successful documents
+      const successes = [];
+      const failures = [];
+
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          const docResult = result.value;
+          // Extract tool call arguments and save to database
+          const toolCall = docResult.raw.choices[0].message.tool_calls[0];
+          const args = JSON.parse(toolCall.function.arguments);
+
+          try {
+            await saveSpecificationDocument(
+              args.filename,
+              args.content,
+              args.description,
+              args.document_type,
+              args.next_steps,
+              true, // skip_technical_summary
+              userSession,
+              externalId
+            );
+            successes.push(docResult.documentType);
+          } catch (saveError) {
+            console.error(`Failed to save ${docResult.documentType}:`, saveError);
+            failures.push(docResult.documentType);
+          }
+        } else {
+          console.error('Document generation failed:', result.reason);
+          failures.push('unknown');
+        }
+      }
+
+      return NextResponse.json({
+        text: `🎉 **All Documents Generated!** Successfully created ${successes.length} documents in parallel.\n\n**Generated:** ${successes.join(', ')}\n\n${failures.length > 0 ? `**Failed:** ${failures.join(', ')}\n\n` : ''}Your complete project specification is ready!`,
+        provider: 'claude-parallel',
+        documentsGenerated: successes.length,
+        documentsFailed: failures.length,
+        usage: response.usage
+      });
+
+    } catch (error: any) {
+      console.error('FINALIZE processing error:', error?.message);
+      // Fall through to normal processing if FINALIZE parsing fails
+    }
+  }
+
   // Check if Claude wants to call a tool
   const toolUses = response.content.filter((content: any) => content.type === 'tool_use');
   
@@ -1000,10 +1289,10 @@ export async function POST(request: NextRequest) {
     // No intro brief context - architect works standalone
     const introBriefPrompt = '';
       
-    const contextualPrompt = existingDocs.length > 0 
-      ? `${SYSTEM_PROMPT}${techModePrompt}${fastModePrompt}${timelinePrompt}${introBriefPrompt}\n\n## SESSION CONTEXT:\nCompleted documents: ${completedTypes.join(', ')}\nNEXT DOCUMENT TO CREATE: ${nextDocType}\nQuestions asked for ${nextDocType}: ${questionCount}/${maxQuestions}\n\n${questionCount >= maxQuestions 
-          ? `QUESTION LIMIT REACHED: Make background decisions for remaining questions and create the ${nextDocType} document immediately.`
-          : `Ask only highest uncertainty questions for ${nextDocType}. When limit reached or sufficient info gathered, create document with background decisions for unasked questions.`}\n\nDo NOT create documents that already exist. When you have sufficient information about ${nextDocType}, call save_specification_document tool to create the ${nextDocType} document, then move to the next phase.`
+    const contextualPrompt = existingDocs.length > 0
+      ? `${SYSTEM_PROMPT}${techModePrompt}${fastModePrompt}${timelinePrompt}${introBriefPrompt}\n\n## SESSION CONTEXT:\nQuestions already asked for ${nextDocType}: ${questionCount}/${maxQuestions}\n\n${questionCount >= maxQuestions
+          ? `QUESTION LIMIT REACHED for ${nextDocType}: Move to next section's questions.`
+          : `Continue asking highest uncertainty questions for ${nextDocType} section.`}\n\nDo NOT generate any documents during interrogation. Only ask questions to gather information.`
       : `${SYSTEM_PROMPT}${techModePrompt}${fastModePrompt}${timelinePrompt}${introBriefPrompt}`;
 
     // Step 1: Send request with tools available using the selected AI provider

@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { widgetAuth, ThemeConfig } from '@/lib/auth';
 import { WidgetTheme } from '@/lib/theme';
 import { getApiUrl } from '@/lib/api-config';
 import SaveSessionModal from './SaveSessionModal';
+import DocumentGenerationModal from './DocumentGenerationModal';
 import parentComm from '../lib/utils/parentCommunication';
 
 interface Message {
@@ -64,6 +65,17 @@ export default function Chat({
   const [isLoadingSession, setIsLoadingSession] = useState(false);
   const [loadSuccessMessage, setLoadSuccessMessage] = useState<string | null>(null);
   const [currentSessionId, setCurrentSessionId] = useState<string>('');
+  const [isGeneratingDocuments, setIsGeneratingDocuments] = useState(false);
+  const [parallelGenerationStarted, setParallelGenerationStarted] = useState(false);
+
+  // Handle document generation completion
+  const handleDocumentGenerationComplete = useCallback(() => {
+    setIsGeneratingDocuments(false);
+    // The modal will handle the redirect
+    if (onViewDocuments) {
+      onViewDocuments();
+    }
+  }, [onViewDocuments]);
 
   // Initialize external ID and session on component mount
   useEffect(() => {
@@ -370,28 +382,50 @@ export default function Chat({
       });
 
       const data = await response.json();
-      
+
       if (response.ok) {
-        const assistantMessage: Message = { role: 'assistant', content: data.text };
-        setMessages([...newMessages, assistantMessage]);
-        
-        // Save message pair after receiving response
-        await saveMessagePair(userMessage, assistantMessage);
-        
-        // Check if session is complete
-        if (data.sessionComplete) {
+        // Check if this is a parallel generation response
+        if (data.provider === 'openai-parallel' || data.provider === 'claude-parallel') {
+          console.log('🚀 Parallel document generation detected!');
+          setIsGeneratingDocuments(true);
+          setParallelGenerationStarted(true);
+
+          // Still add the message to show the FINALIZE block
+          const assistantMessage: Message = { role: 'assistant', content: data.text };
+          setMessages([...newMessages, assistantMessage]);
+
+          // Save the session state
+          await saveMessagePair(userMessage, assistantMessage);
+
+          // Mark session as complete after documents are generated
           setSessionComplete(true);
 
           // Deduct credits for architect completion (2 credits)
           console.log('💳 Triggering credit deduction for architect completion');
           parentComm.signalWorkComplete('architect-completion', 2);
 
-          // Auto-transition to document viewer after a short delay
-          if (onViewDocuments) {
-            setTimeout(() => {
-              console.log('🎉 Session complete! Auto-transitioning to document viewer...');
-              onViewDocuments();
-            }, 2000); // 2 second delay to let user see the completion message
+        } else {
+          const assistantMessage: Message = { role: 'assistant', content: data.text };
+          setMessages([...newMessages, assistantMessage]);
+
+          // Save message pair after receiving response
+          await saveMessagePair(userMessage, assistantMessage);
+
+          // Check if session is complete
+          if (data.sessionComplete) {
+            setSessionComplete(true);
+
+            // Deduct credits for architect completion (2 credits)
+            console.log('💳 Triggering credit deduction for architect completion');
+            parentComm.signalWorkComplete('architect-completion', 2);
+
+            // Auto-transition to document viewer after a short delay
+            if (onViewDocuments) {
+              setTimeout(() => {
+                console.log('🎉 Session complete! Auto-transitioning to document viewer...');
+                onViewDocuments();
+              }, 2000); // 2 second delay to let user see the completion message
+            }
           }
         }
         
@@ -946,6 +980,13 @@ Now let's dive deep into the technical architecture. I'll focus on the technical
         onSave={saveSession}
         isLoading={isSavingSession}
         defaultName={`Draft ${new Date().toLocaleDateString()}`}
+      />
+
+      <DocumentGenerationModal
+        isGenerating={isGeneratingDocuments}
+        onComplete={handleDocumentGenerationComplete}
+        sessionId={userSession}
+        documentsToGenerate={13}
       />
     </div>
   );
