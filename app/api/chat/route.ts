@@ -5,6 +5,15 @@ import { prisma } from '@/lib/db';
 import { v4 as uuidv4 } from 'uuid';
 import { extractFinalizeInner, parseFinalize, FinalizeError } from '@/lib/finalize/parse';
 import { fanOutDocGeneration } from '@/lib/runtime/fanout';
+import {
+  createEmptyLedger,
+  ingestQA,
+  promoteGlobalContext,
+  recordDecision,
+  recordUnresolved,
+  formatLedgerSliceForContext,
+  estimateTokenSavings
+} from '@/lib/ledger';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -16,6 +25,9 @@ const anthropic = new Anthropic({
 
 // Feature switch - set to 'openai' or 'claude'
 const AI_PROVIDER = process.env.AI_PROVIDER || 'openai';
+
+// Feature flag for using ledger instead of transcript for doc generation
+const USE_LEDGER_FOR_DOCGEN = process.env.USE_LEDGER_FOR_DOCGEN !== 'false'; // Default to true
 
 // Define available functions
 const tools = [
@@ -584,7 +596,7 @@ function getSpecificQuestionForDocType(docType: string): string {
 }
 
 // Handler for OpenAI requests
-async function handleOpenAIRequest(messages: any[], contextualPrompt: string, userSession: string, techDecisions = false, fastMode = false, timeline = 1, externalId = 'sreeveTest123', contextualIntroBrief?: any) {
+async function handleOpenAIRequest(messages: any[], contextualPrompt: string, userSession: string, techDecisions = false, fastMode = false, timeline = 1, externalId = 'sreeveTest123', contextualIntroBrief?: any, ledger?: any) {
   const response = await callOpenAI(messages, contextualPrompt);
   const responseMessage = response.choices[0].message;
   const responseText = responseMessage.content || '';
@@ -595,18 +607,16 @@ async function handleOpenAIRequest(messages: any[], contextualPrompt: string, us
     try {
       const finalizeBlock = parseFinalize(finalizeInner);
 
-      // Get full conversation transcript for document generation
-      const transcript = messages.map((msg: any) =>
-        `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`
-      ).join('\n\n');
-
       // Start parallel document generation
       console.log('🚀 Starting parallel document generation for:', finalizeBlock.docs);
+      console.log(`📊 Ledger mode: ${USE_LEDGER_FOR_DOCGEN ? 'ENABLED' : 'DISABLED'}`);
 
       const results = await fanOutDocGeneration(
         {
           docs: finalizeBlock.docs,
-          transcript
+          transcript: JSON.stringify(ledger, null, 2), // Fallback to ledger JSON
+          useLedger: USE_LEDGER_FOR_DOCGEN,
+          ledger: USE_LEDGER_FOR_DOCGEN ? ledger : undefined
         },
         {
           openai,
@@ -860,7 +870,7 @@ async function handleOpenAIRequest(messages: any[], contextualPrompt: string, us
 }
 
 // Handler for Claude requests
-async function handleClaudeRequest(messages: any[], contextualPrompt: string, userSession: string, techDecisions = false, fastMode = false, timeline = 1, externalId = 'sreeveTest123', contextualIntroBrief?: any) {
+async function handleClaudeRequest(messages: any[], contextualPrompt: string, userSession: string, techDecisions = false, fastMode = false, timeline = 1, externalId = 'sreeveTest123', contextualIntroBrief?: any, ledger?: any) {
   const response = await callClaude(messages, contextualPrompt);
 
   // Extract text content from Claude response
@@ -873,18 +883,16 @@ async function handleClaudeRequest(messages: any[], contextualPrompt: string, us
     try {
       const finalizeBlock = parseFinalize(finalizeInner);
 
-      // Get full conversation transcript for document generation
-      const transcript = messages.map((msg: any) =>
-        `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`
-      ).join('\n\n');
-
       // Start parallel document generation
       console.log('🚀 Starting parallel document generation for:', finalizeBlock.docs);
+      console.log(`📊 Ledger mode: ${USE_LEDGER_FOR_DOCGEN ? 'ENABLED' : 'DISABLED'}`);
 
       const results = await fanOutDocGeneration(
         {
           docs: finalizeBlock.docs,
-          transcript
+          transcript: JSON.stringify(ledger, null, 2), // Fallback to ledger JSON
+          useLedger: USE_LEDGER_FOR_DOCGEN,
+          ledger: USE_LEDGER_FOR_DOCGEN ? ledger : undefined
         },
         {
           openai,
@@ -1227,6 +1235,31 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'messages array required' }, { status: 400 });
     }
 
+    // Initialize or load ledger for this session
+    // TODO: Load from database if exists, otherwise create empty
+    const ledger = createEmptyLedger();
+
+    // If we have messages, we might need to rebuild ledger from conversation
+    // For now, we'll ingest the latest Q&A pair if it exists
+    if (messages.length >= 2) {
+      const lastUserMessage = messages[messages.length - 1];
+      const secondLastMessage = messages[messages.length - 2];
+
+      if (lastUserMessage.role === 'user' && secondLastMessage.role === 'assistant') {
+        // Ingest the latest Q&A pair
+        ingestQA(
+          ledger,
+          secondLastMessage.content,
+          lastUserMessage.content,
+          messages.length,
+          new Date().toISOString()
+        );
+
+        // Promote global context periodically
+        promoteGlobalContext(ledger);
+      }
+    }
+
     // Skip intro brief - architect works standalone now
     let contextualIntroBrief = null;
 
@@ -1298,20 +1331,20 @@ export async function POST(request: NextRequest) {
     // Step 1: Send request with tools available using the selected AI provider
     if (AI_PROVIDER === 'claude') {
       try {
-        return await handleClaudeRequest(messages, contextualPrompt, userSession, techDecisions, fastMode, timeline, externalId, contextualIntroBrief);
+        return await handleClaudeRequest(messages, contextualPrompt, userSession, techDecisions, fastMode, timeline, externalId, contextualIntroBrief, ledger);
       } catch (error: any) {
         console.error('Claude request failed, attempting fallback to OpenAI:', error?.message);
-        
+
         // Fallback to OpenAI if Claude fails
         if (process.env.OPENAI_API_KEY) {
           console.log('Falling back to OpenAI...');
-          return await handleOpenAIRequest(messages, contextualPrompt, userSession, techDecisions, fastMode, timeline, externalId, contextualIntroBrief);
+          return await handleOpenAIRequest(messages, contextualPrompt, userSession, techDecisions, fastMode, timeline, externalId, contextualIntroBrief, ledger);
         } else {
           throw error; // Re-throw if no OpenAI fallback available
         }
       }
     } else {
-      return await handleOpenAIRequest(messages, contextualPrompt, userSession, techDecisions, fastMode, timeline, externalId, contextualIntroBrief);
+      return await handleOpenAIRequest(messages, contextualPrompt, userSession, techDecisions, fastMode, timeline, externalId, contextualIntroBrief, ledger);
     }
 
   } catch (error) {

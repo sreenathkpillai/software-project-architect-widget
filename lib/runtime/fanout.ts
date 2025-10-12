@@ -1,6 +1,7 @@
 import pLimit from "p-limit";
 import { DocType } from "@/lib/types/docs";
 import { buildDocOverride, buildContextFromTranscript } from "@/lib/docgen/messages";
+import { Ledger, formatLedgerSliceForContext } from "@/lib/ledger";
 
 type GenCfg = {
   openai: any;            // your client
@@ -14,7 +15,9 @@ type GenCfg = {
 
 export async function fanOutDocGeneration(input: {
   docs: DocType[],
-  transcript: string
+  transcript: string,
+  useLedger?: boolean,
+  ledger?: Ledger
 }, cfg: GenCfg) {
   const {
     openai, systemPrompt, model,
@@ -23,10 +26,20 @@ export async function fanOutDocGeneration(input: {
 
   const limit = pLimit(concurrency);
   const tasks = input.docs.map(doc => limit(async () => {
+    // Build context based on ledger or transcript
+    let contextContent: string;
+    if (input.useLedger && input.ledger) {
+      contextContent = formatLedgerSliceForContext(input.ledger, doc);
+      console.log(`[Fanout] Using ledger slice for ${doc}`);
+    } else {
+      contextContent = buildContextFromTranscript(input.transcript);
+      console.log(`[Fanout] Using transcript for ${doc}`);
+    }
+
     const messages = [
       { role: "system", content: systemPrompt },
       { role: "user", content: buildDocOverride(doc) },
-      { role: "user", content: buildContextFromTranscript(input.transcript) }
+      { role: "user", content: contextContent }
     ];
 
     const resp = await openai.chat.completions.create({
