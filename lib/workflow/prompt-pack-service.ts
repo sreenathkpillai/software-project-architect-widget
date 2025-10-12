@@ -2,6 +2,13 @@ import { prisma } from '@/lib/db';
 import { WorkflowStory, WorkflowCodebaseAnalysis } from '@prisma/client';
 import * as fs from 'fs';
 import * as path from 'path';
+import OpenAI from 'openai';
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+const AI_MODEL = process.env.OPENAI_MODEL || 'gpt-5';
 
 export interface Prompt {
   phase: string;
@@ -16,6 +23,16 @@ export interface ImplementationStep {
   location: string;
   details: string;
   estimatedTime?: string;
+}
+
+export interface AIGeneratedContext {
+  techStack: string[];
+  patterns: string[];
+  architecture: string;
+  relevantComponents: string[];
+  implementationSteps: ImplementationStep[];
+  testingRequirements: string[];
+  platformSpecificNotes: string;
 }
 
 export interface PromptPackData {
@@ -44,10 +61,36 @@ export interface PromptPackData {
     projectName: string;
     storyId: string;
     version: string;
+    platformSpecificNotes?: string;
   };
 }
 
 export class WorkflowPromptPackService {
+  /**
+   * Get existing prompt packs for a story
+   */
+  async getPromptPacksForStory(storyId: string, externalId: string): Promise<any[]> {
+    // Get the story with project info
+    const story = await prisma.workflowStory.findFirst({
+      where: {
+        id: storyId,
+        project: { externalId }
+      },
+      include: {
+        project: true,
+        promptPacks: {
+          orderBy: { createdAt: 'desc' }
+        }
+      }
+    });
+
+    if (!story) {
+      throw new Error('Story not found');
+    }
+
+    return story.promptPacks || [];
+  }
+
   /**
    * Generate prompt pack for a story
    */
@@ -150,7 +193,7 @@ export class WorkflowPromptPackService {
   }
 
   /**
-   * Build implementation prompts from story and analysis
+   * Build implementation prompts from story and analysis using AI
    */
   private async buildImplementationPrompts(
     story: WorkflowStory & { project: any },
@@ -158,22 +201,14 @@ export class WorkflowPromptPackService {
   ): Promise<PromptPackData> {
     const codebaseOverview = analysis?.content || 'No codebase analysis available';
 
-    // Extract tech stack and patterns from analysis
-    const techStack = this.extractTechStack(codebaseOverview);
-    const patterns = this.extractPatterns(codebaseOverview);
-    const relevantComponents = this.identifyRelevantComponents(story, codebaseOverview);
-
-    // Generate implementation steps
-    const steps = this.generateImplementationSteps(story, codebaseOverview);
-
-    // Generate testing requirements
-    const testingRequirements = this.generateTestingRequirements(story, techStack);
+    // Generate comprehensive context using AI
+    const aiContext = await this.generateContextWithAI(story, codebaseOverview);
 
     // Generate acceptance criteria
     const acceptanceCriteria = this.parseAcceptanceCriteria(story.acceptanceCriteria || undefined);
 
-    // Generate prompts for each phase
-    const prompts = this.generatePhasePrompts(story, codebaseOverview, steps);
+    // Generate prompts for each phase using AI context
+    const prompts = this.generatePhasePrompts(story, codebaseOverview, aiContext.implementationSteps);
 
     const promptPackData: PromptPackData = {
       story: {
@@ -185,14 +220,14 @@ export class WorkflowPromptPackService {
       },
       context: {
         codebaseOverview: codebaseOverview.substring(0, 2000), // Limit length
-        relevantComponents,
-        techStack,
-        patterns,
-        architecture: this.extractArchitecture(codebaseOverview)
+        relevantComponents: aiContext.relevantComponents,
+        techStack: aiContext.techStack,
+        patterns: aiContext.patterns,
+        architecture: aiContext.architecture
       },
       implementation: {
-        steps,
-        testingRequirements,
+        steps: aiContext.implementationSteps,
+        testingRequirements: aiContext.testingRequirements,
         acceptanceCriteria
       },
       prompts,
@@ -200,7 +235,8 @@ export class WorkflowPromptPackService {
         generatedAt: new Date().toISOString(),
         projectName: story.project.name,
         storyId: story.id,
-        version: '1.0'
+        version: '2.0', // AI-powered version
+        platformSpecificNotes: aiContext.platformSpecificNotes
       }
     };
 
@@ -208,206 +244,165 @@ export class WorkflowPromptPackService {
   }
 
   /**
-   * Extract tech stack from codebase analysis
+   * Generate comprehensive context using AI analysis
    */
-  private extractTechStack(analysis: string): string[] {
-    const techStack: string[] = [];
+  private async generateContextWithAI(
+    story: WorkflowStory,
+    codebaseAnalysis: string
+  ): Promise<AIGeneratedContext> {
+    try {
+      const prompt = this.buildContextPrompt(story, codebaseAnalysis);
+      console.log(`[AI Context] Prompt length: ${prompt.length} characters`);
+      console.log(`[AI Context] Using model: ${AI_MODEL}`);
 
-    // Common technology indicators
-    const techPatterns = {
-      'React': /react/i,
-      'Next.js': /next\.?js/i,
-      'TypeScript': /typescript|\.ts|\.tsx/i,
-      'JavaScript': /javascript|\.js|\.jsx/i,
-      'Node.js': /node\.?js|npm|yarn/i,
-      'Express': /express/i,
-      'Prisma': /prisma/i,
-      'PostgreSQL': /postgresql|postgres/i,
-      'MongoDB': /mongodb|mongoose/i,
-      'Tailwind CSS': /tailwind/i,
-      'CSS': /css|styling/i,
-      'Python': /python|\.py/i,
-      'Django': /django/i,
-      'Flask': /flask/i,
-      'FastAPI': /fastapi/i,
-      'Vue.js': /vue\.?js/i,
-      'Angular': /angular/i,
-      'Docker': /docker/i,
-      'AWS': /aws|amazon/i,
-      'Vercel': /vercel/i
+      const response = await openai.chat.completions.create({
+        model: AI_MODEL,
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a senior software architect analyzing codebases to generate implementation guidance. Provide accurate, platform-specific analysis based on the actual codebase, not assumptions.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        temperature: 1
+      });
+
+      console.log(`[AI Context] Response status:`, response.choices?.length || 0, 'choices');
+
+      const content = response.choices[0]?.message?.content;
+      if (!content) {
+        console.error('[AI Context] Empty response from GPT-5:', {
+          choices: response.choices,
+          usage: response.usage,
+          model: response.model
+        });
+        throw new Error('No response from AI');
+      }
+
+      console.log(`[AI Context] Received ${content.length} characters from GPT-5`);
+
+      const aiContext = JSON.parse(content);
+      return this.validateAIContext(aiContext);
+
+    } catch (error) {
+      console.error('AI context generation failed:', error);
+      console.log('[AI Context] Falling back to basic implementation');
+      return this.generateBasicFallback(story, codebaseAnalysis);
+    }
+  }
+
+  /**
+   * Build the AI context prompt
+   */
+  private buildContextPrompt(story: WorkflowStory, codebaseAnalysis: string): string {
+    return `You are analyzing a codebase to generate implementation guidance for a user story.
+
+CODEBASE ANALYSIS:
+${codebaseAnalysis}
+
+USER STORY:
+Title: ${story.title}
+Description: ${story.description}
+Priority: ${story.priority}
+
+Based on the codebase analysis, generate a JSON response with:
+
+{
+  "techStack": [
+    // Actual technologies used (e.g., ["C++", "MFC", "Visual Studio"] or ["Python", "Django", "PostgreSQL"])
+    // Extract from analysis, don't assume web technologies
+  ],
+  "patterns": [
+    // Actual architectural patterns (e.g., ["MVC", "Observer Pattern"] or ["Microservices", "Event-driven"])
+    // Match the platform/language identified
+  ],
+  "architecture": "Concise description of actual architecture from analysis",
+  "relevantComponents": [
+    // Actual files/modules that would be modified for this story
+    // Based on codebase structure, not assumed web paths
+  ],
+  "implementationSteps": [
+    {
+      "order": 1,
+      "task": "Platform-specific task name",
+      "location": "Actual file/directory path from analysis",
+      "details": "Specific implementation details for this codebase",
+      "estimatedTime": "realistic estimate"
+    }
+    // Generate 5-8 context-appropriate steps
+  ],
+  "testingRequirements": [
+    // Platform-appropriate testing approaches
+    // e.g., ["Unit tests with Google Test"] for C++ or ["Jest/RTL component tests"] for React
+  ],
+  "platformSpecificNotes": "Important considerations for this specific platform/stack"
+}
+
+Requirements:
+- Extract actual technologies from the analysis, don't assume web stack
+- Generate implementation steps that match the actual codebase structure
+- Use realistic file paths and commands from the analysis
+- Be specific about the platform (Windows Desktop, Web App, CLI tool, etc.)
+- If analysis is insufficient, use "Unknown" rather than web defaults
+- Ensure all JSON is valid and properly escaped`;
+  }
+
+  /**
+   * Validate AI context response
+   */
+  private validateAIContext(aiContext: any): AIGeneratedContext {
+    return {
+      techStack: Array.isArray(aiContext.techStack) ? aiContext.techStack : ['Unknown'],
+      patterns: Array.isArray(aiContext.patterns) ? aiContext.patterns : ['Unknown patterns'],
+      architecture: typeof aiContext.architecture === 'string' ? aiContext.architecture : 'Unknown architecture',
+      relevantComponents: Array.isArray(aiContext.relevantComponents) ? aiContext.relevantComponents : [],
+      implementationSteps: Array.isArray(aiContext.implementationSteps) ? aiContext.implementationSteps : [],
+      testingRequirements: Array.isArray(aiContext.testingRequirements) ? aiContext.testingRequirements : ['Add appropriate tests'],
+      platformSpecificNotes: typeof aiContext.platformSpecificNotes === 'string' ? aiContext.platformSpecificNotes : ''
     };
-
-    Object.entries(techPatterns).forEach(([tech, pattern]) => {
-      if (pattern.test(analysis)) {
-        techStack.push(tech);
-      }
-    });
-
-    return techStack.length > 0 ? techStack : ['JavaScript', 'React', 'Node.js'];
   }
 
   /**
-   * Extract coding patterns from analysis
+   * Generate basic fallback when AI fails
    */
-  private extractPatterns(analysis: string): string[] {
-    const patterns: string[] = [];
-
-    // Common pattern indicators
-    if (/component|jsx|tsx/i.test(analysis)) patterns.push('Component-based architecture');
-    if (/api|route|endpoint/i.test(analysis)) patterns.push('RESTful API design');
-    if (/hook|use[A-Z]/i.test(analysis)) patterns.push('React Hooks pattern');
-    if (/service|class/i.test(analysis)) patterns.push('Service layer pattern');
-    if (/middleware/i.test(analysis)) patterns.push('Middleware pattern');
-    if (/prisma|orm/i.test(analysis)) patterns.push('ORM/Database abstraction');
-    if (/auth|login|jwt/i.test(analysis)) patterns.push('Authentication system');
-    if (/test|spec/i.test(analysis)) patterns.push('Test-driven development');
-
-    return patterns.length > 0 ? patterns : ['Component-based architecture', 'RESTful API design'];
+  private generateBasicFallback(story: WorkflowStory, analysis: string): AIGeneratedContext {
+    return {
+      techStack: ['Unknown platform'],
+      patterns: ['Unknown patterns'],
+      architecture: 'Unable to determine architecture',
+      relevantComponents: ['See codebase analysis for guidance'],
+      implementationSteps: [
+        {
+          order: 1,
+          task: 'Analyze codebase structure',
+          location: 'Project root',
+          details: 'Review the codebase analysis to understand project structure',
+          estimatedTime: '30 minutes'
+        },
+        {
+          order: 2,
+          task: 'Implement feature',
+          location: 'Appropriate location based on analysis',
+          details: story.description,
+          estimatedTime: '2-4 hours'
+        },
+        {
+          order: 3,
+          task: 'Add tests',
+          location: 'Test directory',
+          details: 'Implement appropriate tests for the platform',
+          estimatedTime: '1 hour'
+        }
+      ],
+      testingRequirements: ['Implement appropriate tests for the platform'],
+      platformSpecificNotes: 'AI analysis failed - refer to codebase analysis for implementation guidance'
+    };
   }
 
-  /**
-   * Identify components relevant to the story
-   */
-  private identifyRelevantComponents(story: WorkflowStory, analysis: string): string[] {
-    const components: string[] = [];
-
-    // Extract component mentions from analysis
-    const componentPattern = /(?:components?|pages?|services?|utils?|lib|api)[\/\\]([^\/\\]+)/gi;
-    let match;
-
-    while ((match = componentPattern.exec(analysis)) !== null) {
-      const component = match[1];
-      if (component && !component.includes('.')) {
-        components.push(component);
-      }
-    }
-
-    // Add story-specific components
-    const storyKeywords = story.title.toLowerCase().split(' ');
-    storyKeywords.forEach(keyword => {
-      if (keyword.length > 3) {
-        components.push(`${keyword}Component`);
-      }
-    });
-
-    return Array.from(new Set(components)).slice(0, 8); // Limit to 8 components
-  }
-
-  /**
-   * Extract architecture information
-   */
-  private extractArchitecture(analysis: string): string {
-    // Look for architecture section
-    const archMatch = analysis.match(/(?:## Architecture|### Architecture)([\s\S]*?)(?:##|$)/i);
-    if (archMatch) {
-      return archMatch[1].trim().substring(0, 500);
-    }
-
-    // Fallback: extract structure information
-    const structMatch = analysis.match(/(?:## Structure|### Structure)([\s\S]*?)(?:##|$)/i);
-    if (structMatch) {
-      return structMatch[1].trim().substring(0, 500);
-    }
-
-    return 'Standard web application architecture with frontend and backend components';
-  }
-
-  /**
-   * Generate implementation steps
-   */
-  private generateImplementationSteps(story: WorkflowStory, analysis: string): ImplementationStep[] {
-    const steps: ImplementationStep[] = [];
-
-    // Basic implementation flow
-    steps.push({
-      order: 1,
-      task: 'Create feature branch',
-      location: 'Git repository',
-      details: `Create a new branch for implementing: ${story.title}`,
-      estimatedTime: '5 minutes'
-    });
-
-    steps.push({
-      order: 2,
-      task: 'Create/modify components',
-      location: 'src/components',
-      details: `Implement the UI components needed for: ${story.description}`,
-      estimatedTime: '2-4 hours'
-    });
-
-    if (analysis.includes('api') || analysis.includes('backend')) {
-      steps.push({
-        order: 3,
-        task: 'Implement API endpoints',
-        location: 'api routes',
-        details: `Create or modify API endpoints to support: ${story.title}`,
-        estimatedTime: '1-2 hours'
-      });
-    }
-
-    if (analysis.includes('database') || analysis.includes('prisma')) {
-      steps.push({
-        order: 4,
-        task: 'Update database schema',
-        location: 'prisma/schema.prisma',
-        details: 'Add or modify database models if needed',
-        estimatedTime: '30 minutes'
-      });
-    }
-
-    steps.push({
-      order: 5,
-      task: 'Add styling',
-      location: 'component styles',
-      details: 'Style the components according to design system',
-      estimatedTime: '1 hour'
-    });
-
-    steps.push({
-      order: 6,
-      task: 'Write tests',
-      location: '__tests__ directory',
-      details: 'Create unit and integration tests for the new functionality',
-      estimatedTime: '1-2 hours'
-    });
-
-    steps.push({
-      order: 7,
-      task: 'Test and review',
-      location: 'Local development',
-      details: 'Test the implementation and create pull request',
-      estimatedTime: '30 minutes'
-    });
-
-    return steps;
-  }
-
-  /**
-   * Generate testing requirements
-   */
-  private generateTestingRequirements(story: WorkflowStory, techStack: string[]): string[] {
-    const requirements: string[] = [];
-
-    requirements.push('Unit tests for all new functions and components');
-    requirements.push('Integration tests for user workflows');
-
-    if (techStack.includes('React')) {
-      requirements.push('Component rendering tests using React Testing Library');
-    }
-
-    if (story.description.toLowerCase().includes('api')) {
-      requirements.push('API endpoint testing with proper error handling');
-    }
-
-    if (story.description.toLowerCase().includes('auth')) {
-      requirements.push('Authentication and authorization testing');
-    }
-
-    requirements.push('Browser compatibility testing');
-    requirements.push('Responsive design testing on mobile devices');
-
-    return requirements;
-  }
+  // Note: Hardcoded extraction methods replaced with AI-powered analysis
 
   /**
    * Parse acceptance criteria
@@ -427,7 +422,7 @@ export class WorkflowPromptPackService {
   }
 
   /**
-   * Generate phase-specific prompts
+   * Generate phase-specific prompts using AI context
    */
   private generatePhasePrompts(
     story: WorkflowStory,
@@ -467,14 +462,14 @@ Description: ${story.description}
 Priority: ${story.priority}
 
 Implementation Steps:
-${steps.map(step => `${step.order}. ${step.task} (${step.location}): ${step.details}`).join('\n')}
+${steps.map(step => `${step.order}. ${step.task} (${step.location}): ${step.details} [${step.estimatedTime}]`).join('\n')}
 
 Requirements:
 - Follow existing code patterns and style
-- Ensure responsive design
+- Use the project's actual build system and conventions
 - Add proper error handling
-- Include loading states where appropriate
-- Maintain accessibility standards
+- Include appropriate logging/debugging
+- Follow platform-specific best practices
 
 ${story.acceptanceCriteria ? `\nAcceptance Criteria:\n${story.acceptanceCriteria}` : ''}
 
@@ -487,16 +482,12 @@ Start with step 1 and implement each step systematically.`,
       phase: 'testing',
       prompt: `Create comprehensive tests for the implemented feature: "${story.title}"
 
-Requirements:
-- Unit tests for all new functions and components
-- Integration tests for user workflows
-- Error handling tests
-- Edge case testing
+Follow the testing patterns and frameworks identified in the codebase.
 
-Test scenarios to cover:
-${this.generateTestingRequirements(story, ['React', 'JavaScript']).map(req => `- ${req}`).join('\n')}
+Implementation Steps Reference:
+${steps.filter(step => step.task.toLowerCase().includes('test')).map(step => `- ${step.details}`).join('\n')}
 
-Ensure all tests pass and provide good coverage for the new functionality.`,
+Ensure all tests pass and provide good coverage for the new functionality. Use the project's existing testing infrastructure and conventions.`,
       context: 'Testing and quality assurance'
     });
 
@@ -506,17 +497,17 @@ Ensure all tests pass and provide good coverage for the new functionality.`,
       prompt: `Review the implementation of: "${story.title}"
 
 Checklist:
-- ✅ Code follows project conventions
+- ✅ Code follows project conventions and patterns
 - ✅ All acceptance criteria are met
 - ✅ Tests are comprehensive and passing
 - ✅ No performance regressions
-- ✅ Accessible to users with disabilities
-- ✅ Works on mobile devices
+- ✅ Platform-specific requirements addressed
 - ✅ Error handling is robust
+- ✅ Documentation updated if needed
 
 Create a pull request with:
 1. Clear description of changes
-2. Screenshots/videos of new functionality
+2. Evidence of functionality (screenshots, logs, etc.)
 3. Test coverage report
 4. Notes for reviewers
 
@@ -574,6 +565,9 @@ ${promptPack.implementation.testingRequirements.map(req => `- ${req}`).join('\n'
 
 ### Acceptance Criteria Checklist
 ${promptPack.implementation.acceptanceCriteria.map(criteria => `- [ ] ${criteria}`).join('\n')}
+
+### Platform-Specific Notes
+${promptPack.metadata.platformSpecificNotes || 'No platform-specific considerations identified'}
 
 ## AI Prompts
 

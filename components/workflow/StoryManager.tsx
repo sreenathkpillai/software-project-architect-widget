@@ -5,6 +5,7 @@ import { useWorkflow } from './WorkflowApp';
 import CreateStoryModal from './CreateStoryModal';
 import StoryCard from './StoryCard';
 import PromptPackGenerator from './PromptPackGenerator';
+import PromptPackViewer from './PromptPackViewer';
 import DeleteConfirmModal from './DeleteConfirmModal';
 
 interface StoryManagerProps {
@@ -24,6 +25,8 @@ export default function StoryManager({
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedStory, setSelectedStory] = useState<any>(null);
   const [showPromptGenerator, setShowPromptGenerator] = useState(false);
+  const [showPromptViewer, setShowPromptViewer] = useState(false);
+  const [storyPromptPacks, setStoryPromptPacks] = useState<Record<string, boolean>>({});
   const [editingStory, setEditingStory] = useState<any>(null);
   const [editForm, setEditForm] = useState<any>({});
   const [deleteStoryModal, setDeleteStoryModal] = useState<{ show: boolean; story: any | null }>({
@@ -31,6 +34,30 @@ export default function StoryManager({
     story: null
   });
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Check for existing prompt packs when stories change
+  React.useEffect(() => {
+    checkPromptPacks();
+  }, [stories, externalId]);
+
+  const checkPromptPacks = async () => {
+    const promptPackStatus: Record<string, boolean> = {};
+
+    await Promise.all(stories.map(async (story) => {
+      try {
+        const response = await fetch(`/widget/api/workflow/stories/${story.id}/prompt-packs?externalId=${externalId}`);
+        if (response.ok) {
+          const data = await response.json();
+          promptPackStatus[story.id] = data.promptPacks.length > 0;
+        }
+      } catch (error) {
+        console.error(`Failed to check prompt packs for story ${story.id}:`, error);
+        promptPackStatus[story.id] = false;
+      }
+    }));
+
+    setStoryPromptPacks(promptPackStatus);
+  };
 
   const handleDeleteStory = async () => {
     if (!deleteStoryModal.story) return;
@@ -55,6 +82,11 @@ export default function StoryManager({
   const handleGeneratePrompt = (story: any) => {
     setSelectedStory(story);
     setShowPromptGenerator(true);
+  };
+
+  const handleViewPromptPack = (story: any) => {
+    setSelectedStory(story);
+    setShowPromptViewer(true);
   };
 
   const handleSaveStory = async () => {
@@ -131,6 +163,8 @@ export default function StoryManager({
                 story={story}
                 onDelete={() => setDeleteStoryModal({ show: true, story })}
                 onGeneratePrompt={() => handleGeneratePrompt(story)}
+                onViewPromptPack={() => handleViewPromptPack(story)}
+                hasPromptPack={storyPromptPacks[story.id] || false}
                 onClick={() => {
                   setEditingStory(story);
                   setEditForm({
@@ -166,7 +200,25 @@ export default function StoryManager({
             setShowPromptGenerator(false);
             setSelectedStory(null);
           }}
-          onGenerated={onStoriesChange}
+          onGenerated={() => {
+            onStoriesChange();
+            checkPromptPacks(); // Refresh prompt pack status
+          }}
+        />
+      )}
+
+      {showPromptViewer && selectedStory && (
+        <PromptPackViewer
+          story={selectedStory}
+          analysis={analysis}
+          onClose={() => {
+            setShowPromptViewer(false);
+            setSelectedStory(null);
+          }}
+          onRegenerated={() => {
+            onStoriesChange();
+            checkPromptPacks(); // Refresh prompt pack status
+          }}
         />
       )}
 

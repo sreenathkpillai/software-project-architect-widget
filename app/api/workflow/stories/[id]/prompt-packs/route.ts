@@ -3,6 +3,33 @@ import { WorkflowPromptPackService } from '@/lib/workflow/prompt-pack-service';
 
 export const dynamic = 'force-dynamic';
 
+export async function GET(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const externalId = searchParams.get('externalId');
+    const { id: storyId } = params;
+
+    if (!externalId) {
+      return NextResponse.json({ error: 'externalId required' }, { status: 400 });
+    }
+
+    const promptPackService = new WorkflowPromptPackService();
+    const promptPacks = await promptPackService.getPromptPacksForStory(storyId, externalId);
+
+    return NextResponse.json({ promptPacks });
+
+  } catch (error) {
+    console.error('Prompt pack fetch error:', error);
+    return NextResponse.json(
+      { error: `Failed to fetch prompt packs: ${error instanceof Error ? error.message : 'Unknown error'}` },
+      { status: 500 }
+    );
+  }
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
