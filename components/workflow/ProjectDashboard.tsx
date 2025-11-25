@@ -4,10 +4,14 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useWorkflow } from './WorkflowApp';
 import CodebaseAnalyzer from './CodebaseAnalyzer';
+import CodebaseEditPanel from './CodebaseEditPanel';
+import CodebaseRefinePanel from './CodebaseRefinePanel';
 import StoryManager from './StoryManager';
 import RepositoryConnector from './RepositoryConnector';
 import GitHubAuthStatus from './GitHubAuthStatus';
 import parentComm from '../../lib/utils/parentCommunication';
+
+type AnalysisViewState = 'view' | 'edit' | 'refine';
 
 interface ProjectDashboardProps {
   projectId: string;
@@ -25,6 +29,8 @@ export default function ProjectDashboard({ projectId }: ProjectDashboardProps) {
   const [showAnalysisViewer, setShowAnalysisViewer] = useState(false);
   const [analysisStatus, setAnalysisStatus] = useState<string>('PENDING');
   const [errorDetails, setErrorDetails] = useState<any>(null);
+  const [storyPanelExpanded, setStoryPanelExpanded] = useState(false);
+  const [analysisViewState, setAnalysisViewState] = useState<AnalysisViewState>('view');
 
   const fetchErrorDetails = async () => {
     try {
@@ -201,7 +207,7 @@ export default function ProjectDashboard({ projectId }: ProjectDashboardProps) {
   }
 
   return (
-    <div className={`${externalId ? 'h-[calc(100vh-2rem)]' : 'h-[calc(100vh-8rem)]'}`}>
+    <div className="h-full flex flex-col">
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-start space-x-3">
           <button
@@ -265,25 +271,60 @@ export default function ProjectDashboard({ projectId }: ProjectDashboardProps) {
       </div>
 
       {/* Split view for desktop, single view for mobile */}
-      <div className="flex gap-4 h-[calc(100%-4rem)]">
-        <div className={`${activeTab === 'analysis' ? 'block' : 'hidden'} md:block md:w-1/2 h-full`}>
-          <CodebaseAnalyzer
-            projectId={projectId}
-            project={project}
-            analysis={analysis}
-            analysisStatus={analysisStatus}
-            onAnalyze={handleAnalyze}
-            onUpdate={handleAnalysisUpdate}
-            onConnectRepository={() => setShowRepositoryConnector(true)}
-            onViewAnalysis={() => setShowAnalysisViewer(true)}
-          />
+      <div className="flex-1 flex gap-4 min-h-0">
+        <div
+          className={`${activeTab === 'analysis' ? 'block' : 'hidden'} md:block h-full transition-all duration-300 ${
+            storyPanelExpanded ? 'md:w-1/4' : 'md:w-1/2'
+          }`}
+        >
+          {analysisViewState === 'edit' ? (
+            <CodebaseEditPanel
+              projectId={projectId}
+              project={project}
+              analysis={analysis}
+              onClose={() => setAnalysisViewState('view')}
+              onSaved={() => {
+                setAnalysisViewState('view');
+                fetchProjectData();
+              }}
+            />
+          ) : analysisViewState === 'refine' ? (
+            <CodebaseRefinePanel
+              projectId={projectId}
+              project={project}
+              analysis={analysis}
+              onClose={() => setAnalysisViewState('view')}
+              onRefined={() => {
+                setAnalysisViewState('view');
+                handleAnalyze();
+              }}
+            />
+          ) : (
+            <CodebaseAnalyzer
+              projectId={projectId}
+              project={project}
+              analysis={analysis}
+              analysisStatus={analysisStatus}
+              onAnalyze={handleAnalyze}
+              onUpdate={handleAnalysisUpdate}
+              onConnectRepository={() => setShowRepositoryConnector(true)}
+              onViewAnalysis={() => setShowAnalysisViewer(true)}
+              onEditAnalysis={() => setAnalysisViewState('edit')}
+              onRefineAnalysis={() => setAnalysisViewState('refine')}
+            />
+          )}
         </div>
-        <div className={`${activeTab === 'stories' ? 'block' : 'hidden'} md:block md:w-1/2 h-full`}>
+        <div
+          className={`${activeTab === 'stories' ? 'block' : 'hidden'} md:block h-full transition-all duration-300 ${
+            storyPanelExpanded ? 'md:w-3/4' : 'md:w-1/2'
+          }`}
+        >
           <StoryManager
             projectId={projectId}
             stories={stories}
             analysis={analysis}
             onStoriesChange={fetchProjectData}
+            onPanelExpand={setStoryPanelExpanded}
           />
         </div>
       </div>

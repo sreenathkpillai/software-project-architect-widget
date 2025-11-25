@@ -60,9 +60,9 @@ export default function WorkflowApp({ children, externalId }: WorkflowAppProps) 
         refreshProjects,
       }}
     >
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-gray-100">
+      <div className={`${externalId ? 'h-screen' : 'min-h-screen'} flex flex-col bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-gray-100`}>
         {!externalId && (
-          <header className="border-b border-gray-800/50 bg-gray-900/80 backdrop-blur-sm">
+          <header className="border-b border-gray-800/50 bg-gray-900/80 backdrop-blur-sm flex-shrink-0">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
               <div className="flex items-center justify-between h-16">
                 <div className="flex items-center">
@@ -82,7 +82,7 @@ export default function WorkflowApp({ children, externalId }: WorkflowAppProps) 
             </div>
           </header>
         )}
-        <main className={`max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 ${externalId ? 'py-4' : 'py-8'}`}>
+        <main className={`flex-1 min-h-0 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full ${externalId ? 'py-4' : 'py-8'}`}>
           {children}
         </main>
       </div>

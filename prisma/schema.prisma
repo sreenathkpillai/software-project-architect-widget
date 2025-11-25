@@ -299,6 +299,7 @@ model WorkflowStory {
 
   project         WorkflowProject      @relation(fields: [projectId], references: [id], onDelete: Cascade)
   promptPacks     WorkflowPromptPack[]
+  versions        WorkflowStoryVersion[]
 
   @@index([projectId])
   @@index([externalId])
@@ -349,4 +350,26 @@ enum StorySource {
   AZURE_DEVOPS
   ARCHITECT
   GITHUB_ISSUES
+}
+
+// Story Version History - Tracks original and AI-optimized versions
+model WorkflowStoryVersion {
+  id              String   @id @default(cuid())
+  storyId         String
+  version         Int      @default(1)
+  title           String
+  description     String   @db.Text
+  acceptanceCriteria String? @db.Text
+  priority        Priority @default(MEDIUM)
+  storyPoints     Int?
+  isOriginal      Boolean  @default(false)  // True for user's original input
+  isActive        Boolean  @default(false)  // Currently displayed version
+  optimizationContext Json? // AI conversation context that led to this version
+  createdAt       DateTime @default(now())
+
+  story           WorkflowStory @relation(fields: [storyId], references: [id], onDelete: Cascade)
+
+  @@index([storyId])
+  @@index([storyId, isActive])
+  @@map("workflow_story_versions")
 }

@@ -1,8 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { useWorkflow } from './WorkflowApp';
-import parentComm from '../../lib/utils/parentCommunication';
+import React from 'react';
 
 interface CodebaseAnalyzerProps {
   projectId: string;
@@ -13,6 +11,8 @@ interface CodebaseAnalyzerProps {
   onUpdate: (content: string) => void;
   onConnectRepository: () => void;
   onViewAnalysis?: () => void;
+  onEditAnalysis?: () => void;
+  onRefineAnalysis?: () => void;
 }
 
 export default function CodebaseAnalyzer({
@@ -23,81 +23,10 @@ export default function CodebaseAnalyzer({
   onAnalyze,
   onUpdate,
   onConnectRepository,
-  onViewAnalysis
+  onViewAnalysis,
+  onEditAnalysis,
+  onRefineAnalysis
 }: CodebaseAnalyzerProps) {
-  const { externalId } = useWorkflow();
-  const [isEditing, setIsEditing] = useState(false);
-  const [editContent, setEditContent] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
-  const [showRefineModal, setShowRefineModal] = useState(false);
-  const [refinementQuestions, setRefinementQuestions] = useState<any[]>([]);
-  const [refinementAnswers, setRefinementAnswers] = useState<Record<string, string>>({});
-  const [isRefining, setIsRefining] = useState(false);
-
-  useEffect(() => {
-    if (analysis) {
-      setEditContent(analysis.content || '');
-    }
-  }, [analysis]);
-
-  const handleSave = async () => {
-    setIsSaving(true);
-    await onUpdate(editContent);
-    setIsEditing(false);
-    setIsSaving(false);
-  };
-
-  const handleCancel = () => {
-    setEditContent(analysis?.content || '');
-    setIsEditing(false);
-  };
-
-  const handleRefineAnalysis = async () => {
-    try {
-      // Get refinement questions
-      const response = await fetch(`/widget/api/workflow/projects/${projectId}/analysis/refine?externalId=${externalId}`);
-      if (response.ok) {
-        const data = await response.json();
-        if (data.hasQuestions && data.questions.length > 0) {
-          setRefinementQuestions(data.questions);
-          setRefinementAnswers({});
-          setShowRefineModal(true);
-        } else {
-          alert('No refinement questions available for this analysis.');
-        }
-      } else {
-        alert('Failed to get refinement questions.');
-      }
-    } catch (error) {
-      console.error('Failed to get refinement questions:', error);
-      alert('Failed to get refinement questions.');
-    }
-  };
-
-  const handleSubmitRefinement = async () => {
-    try {
-      setIsRefining(true);
-      const response = await fetch(`/widget/api/workflow/projects/${projectId}/analysis/refine?externalId=${externalId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ answers: refinementAnswers }),
-      });
-
-      if (response.ok) {
-        setShowRefineModal(false);
-        // Trigger a reload of the analysis
-        onAnalyze();
-      } else {
-        alert('Failed to refine analysis.');
-      }
-    } catch (error) {
-      console.error('Failed to refine analysis:', error);
-      alert('Failed to refine analysis.');
-    } finally {
-      setIsRefining(false);
-    }
-  };
-
   const isRepositoryConnected = project && (project.repositoryUrl || project.repositoryPath);
 
   const handleDownload = () => {
@@ -116,10 +45,10 @@ export default function CodebaseAnalyzer({
 
   return (
     <div className="h-full flex flex-col bg-gray-900/60 backdrop-blur-sm rounded-lg border border-purple-500/20">
-      <div className="px-4 py-3 border-b border-gray-800">
+      <div className="px-4 py-3 border-b border-gray-800 flex-shrink-0">
         <h3 className="text-lg font-semibold text-white mb-3">Codebase Analysis</h3>
-        <div className="flex items-center space-x-2">
-          {analysis && !isEditing && (
+        <div className="flex items-center space-x-2 flex-wrap gap-y-2">
+          {analysis && (
             <>
               {onViewAnalysis && (
                 <button
@@ -129,18 +58,22 @@ export default function CodebaseAnalyzer({
                   View
                 </button>
               )}
-              <button
-                onClick={handleRefineAnalysis}
-                className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
-              >
-                Refine
-              </button>
-              <button
-                onClick={() => setIsEditing(true)}
-                className="px-3 py-1 text-sm bg-gray-800 hover:bg-gray-700 text-gray-300 rounded transition-colors"
-              >
-                Edit
-              </button>
+              {onRefineAnalysis && (
+                <button
+                  onClick={onRefineAnalysis}
+                  className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+                >
+                  Refine
+                </button>
+              )}
+              {onEditAnalysis && (
+                <button
+                  onClick={onEditAnalysis}
+                  className="px-3 py-1 text-sm bg-gray-800 hover:bg-gray-700 text-gray-300 rounded transition-colors"
+                >
+                  Edit
+                </button>
+              )}
               <button
                 onClick={handleDownload}
                 className="px-3 py-1 text-sm bg-green-600 hover:bg-green-700 text-white rounded transition-colors flex items-center space-x-1"
@@ -158,28 +91,10 @@ export default function CodebaseAnalyzer({
               </button>
             </>
           )}
-          {isEditing && (
-            <>
-              <button
-                onClick={handleCancel}
-                className="px-3 py-1 text-sm text-gray-400 hover:text-white transition-colors"
-                disabled={isSaving}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSave}
-                className="px-3 py-1 text-sm bg-purple-600 hover:bg-purple-700 text-white rounded transition-colors disabled:opacity-50"
-                disabled={isSaving}
-              >
-                {isSaving ? 'Saving...' : 'Save'}
-              </button>
-            </>
-          )}
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto p-4">
+      <div className="flex-1 overflow-auto p-4 min-h-0">
         {analysisStatus === 'ANALYZING' ? (
           <div className="text-center py-12">
             <div className="animate-spin h-12 w-12 border-4 border-purple-500 border-t-transparent rounded-full mx-auto mb-4" />
@@ -243,13 +158,6 @@ export default function CodebaseAnalyzer({
               </>
             )}
           </div>
-        ) : isEditing ? (
-          <textarea
-            value={editContent}
-            onChange={(e) => setEditContent(e.target.value)}
-            className="w-full h-full bg-gray-800 text-gray-100 p-3 rounded border border-gray-700 focus:outline-none focus:border-blue-500 font-mono text-sm"
-            placeholder="Enter your codebase analysis in markdown format..."
-          />
         ) : (
           <div className="prose prose-invert max-w-none">
             <div
@@ -273,81 +181,6 @@ export default function CodebaseAnalyzer({
           </div>
         )}
       </div>
-
-      {/* Refinement Modal */}
-      {showRefineModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-gray-900/90 backdrop-blur-md border border-blue-500/20 rounded-lg w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col m-4">
-            <div className="flex items-center justify-between p-6 border-b border-gray-700">
-              <h2 className="text-xl font-semibold text-white">Refine Analysis</h2>
-              <button
-                onClick={() => setShowRefineModal(false)}
-                className="text-gray-400 hover:text-white transition-colors"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            <div className="flex-1 overflow-auto p-6">
-              <p className="text-gray-300 mb-6">
-                Please answer these questions to help improve the analysis:
-              </p>
-              <div className="space-y-6">
-                {refinementQuestions.map((question, index) => (
-                  <div key={question.id} className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-200">
-                      {index + 1}. {question.question}
-                    </label>
-                    {question.type === 'choice' && question.choices ? (
-                      <select
-                        value={refinementAnswers[question.id] || ''}
-                        onChange={(e) => setRefinementAnswers(prev => ({
-                          ...prev,
-                          [question.id]: e.target.value
-                        }))}
-                        className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:border-blue-500"
-                      >
-                        <option value="">Select an option...</option>
-                        {question.choices.map((choice: string) => (
-                          <option key={choice} value={choice}>{choice}</option>
-                        ))}
-                        <option value="I don't know">I don't know</option>
-                      </select>
-                    ) : (
-                      <textarea
-                        value={refinementAnswers[question.id] || ''}
-                        onChange={(e) => setRefinementAnswers(prev => ({
-                          ...prev,
-                          [question.id]: e.target.value
-                        }))}
-                        placeholder="Your answer..."
-                        rows={3}
-                        className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:border-blue-500"
-                      />
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="flex items-center justify-end space-x-3 p-6 border-t border-gray-700">
-              <button
-                onClick={() => setShowRefineModal(false)}
-                className="px-4 py-2 text-gray-300 hover:text-white transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSubmitRefinement}
-                disabled={isRefining}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded transition-colors"
-              >
-                {isRefining ? 'Refining...' : 'Submit & Refine'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

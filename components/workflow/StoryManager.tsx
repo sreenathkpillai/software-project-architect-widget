@@ -1,34 +1,35 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useWorkflow } from './WorkflowApp';
-import CreateStoryModal from './CreateStoryModal';
+import CreateStoryPanel from './CreateStoryPanel';
 import StoryCard from './StoryCard';
-import PromptPackGenerator from './PromptPackGenerator';
-import PromptPackViewer from './PromptPackViewer';
+import EditStoryPanel from './EditStoryPanel';
+import PromptPackGeneratorPanel from './PromptPackGeneratorPanel';
+import PromptPackViewerPanel from './PromptPackViewerPanel';
 import DeleteConfirmModal from './DeleteConfirmModal';
+
+type ViewState = 'list' | 'create' | 'edit' | 'generate-prompt' | 'view-prompt';
 
 interface StoryManagerProps {
   projectId: string;
   stories: any[];
   analysis: any;
   onStoriesChange: () => void;
+  onPanelExpand?: (expanded: boolean) => void;
 }
 
 export default function StoryManager({
   projectId,
   stories,
   analysis,
-  onStoriesChange
+  onStoriesChange,
+  onPanelExpand
 }: StoryManagerProps) {
   const { externalId } = useWorkflow();
-  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [viewState, setViewState] = useState<ViewState>('list');
   const [selectedStory, setSelectedStory] = useState<any>(null);
-  const [showPromptGenerator, setShowPromptGenerator] = useState(false);
-  const [showPromptViewer, setShowPromptViewer] = useState(false);
   const [storyPromptPacks, setStoryPromptPacks] = useState<Record<string, boolean>>({});
-  const [editingStory, setEditingStory] = useState<any>(null);
-  const [editForm, setEditForm] = useState<any>({});
   const [deleteStoryModal, setDeleteStoryModal] = useState<{ show: boolean; story: any | null }>({
     show: false,
     story: null
@@ -36,9 +37,12 @@ export default function StoryManager({
   const [isDeleting, setIsDeleting] = useState(false);
 
   // Check for existing prompt packs when stories change
-  React.useEffect(() => {
+  useEffect(() => {
     checkPromptPacks();
   }, [stories, externalId]);
+
+  // Notify parent about expansion state (handled by individual panels via onExpand callback)
+  // This effect is no longer needed as each panel handles its own expansion
 
   const checkPromptPacks = async () => {
     const promptPackStatus: Record<string, boolean> = {};
@@ -71,6 +75,11 @@ export default function StoryManager({
       if (response.ok) {
         onStoriesChange();
         setDeleteStoryModal({ show: false, story: null });
+        // If we were viewing this story, go back to list
+        if (selectedStory?.id === deleteStoryModal.story.id) {
+          setViewState('list');
+          setSelectedStory(null);
+        }
       }
     } catch (error) {
       console.error('Failed to delete story:', error);
@@ -79,56 +88,111 @@ export default function StoryManager({
     }
   };
 
+  const handleEditStory = (story: any) => {
+    setSelectedStory(story);
+    setViewState('edit');
+  };
+
   const handleGeneratePrompt = (story: any) => {
     setSelectedStory(story);
-    setShowPromptGenerator(true);
+    setViewState('generate-prompt');
   };
 
   const handleViewPromptPack = (story: any) => {
     setSelectedStory(story);
-    setShowPromptViewer(true);
+    setViewState('view-prompt');
   };
 
-  const handleSaveStory = async () => {
-    if (!editingStory) return;
-
-    try {
-      const response = await fetch(`/widget/api/workflow/stories/${editingStory.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          externalId,
-          title: editForm.title,
-          description: editForm.description,
-          acceptanceCriteria: editForm.acceptanceCriteria,
-          priority: editForm.priority,
-          storyPoints: editForm.storyPoints ? parseInt(editForm.storyPoints) : null
-        }),
-      });
-
-      if (response.ok) {
-        setEditingStory(null);
-        setEditForm({});
-        onStoriesChange();
-      }
-    } catch (error) {
-      console.error('Failed to update story:', error);
-    }
+  const handleBackToList = () => {
+    setViewState('list');
+    setSelectedStory(null);
   };
 
+  const handleCreatePanel = () => {
+    setViewState('create');
+    setSelectedStory(null);
+  };
+
+  const handlePanelExpand = (expanded: boolean) => {
+    onPanelExpand?.(expanded);
+  };
+
+  // Render based on view state
+  if (viewState === 'create') {
+    return (
+      <CreateStoryPanel
+        projectId={projectId}
+        onClose={handleBackToList}
+        onCreated={() => {
+          handleBackToList();
+          onStoriesChange();
+        }}
+        onExpand={handlePanelExpand}
+      />
+    );
+  }
+
+  if (viewState === 'edit' && selectedStory) {
+    return (
+      <EditStoryPanel
+        projectId={projectId}
+        story={selectedStory}
+        onClose={handleBackToList}
+        onSaved={() => {
+          handleBackToList();
+          onStoriesChange();
+        }}
+        onDelete={() => {
+          setDeleteStoryModal({ show: true, story: selectedStory });
+        }}
+        onExpand={handlePanelExpand}
+      />
+    );
+  }
+
+  if (viewState === 'generate-prompt' && selectedStory) {
+    return (
+      <PromptPackGeneratorPanel
+        story={selectedStory}
+        analysis={analysis}
+        onClose={handleBackToList}
+        onGenerated={() => {
+          onStoriesChange();
+          checkPromptPacks();
+        }}
+      />
+    );
+  }
+
+  if (viewState === 'view-prompt' && selectedStory) {
+    return (
+      <PromptPackViewerPanel
+        story={selectedStory}
+        analysis={analysis}
+        onClose={handleBackToList}
+        onRegenerated={() => {
+          onStoriesChange();
+          checkPromptPacks();
+        }}
+        onExpand={handlePanelExpand}
+      />
+    );
+  }
+
+  // Default: List view
   return (
     <div className="h-full flex flex-col bg-gray-900/60 backdrop-blur-sm rounded-lg border border-purple-500/20">
-      <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
+      <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between flex-shrink-0">
         <h3 className="text-lg font-semibold text-white">Stories</h3>
         <button
-          onClick={() => setShowCreateModal(true)}
+          onClick={handleCreatePanel}
           className="px-3 py-1 text-sm bg-purple-600 hover:bg-purple-700 text-white rounded transition-colors"
         >
           Add Story
         </button>
       </div>
 
-      <div className="flex-1 overflow-auto p-4">
+      <div className="flex-1 overflow-auto p-4 min-h-0">
         {stories.length === 0 ? (
           <div className="text-center py-12">
             <svg
@@ -149,7 +213,7 @@ export default function StoryManager({
               Create your first story to get started
             </p>
             <button
-              onClick={() => setShowCreateModal(true)}
+              onClick={handleCreatePanel}
               className="mt-4 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-md transition-colors"
             >
               Create Story
@@ -165,161 +229,12 @@ export default function StoryManager({
                 onGeneratePrompt={() => handleGeneratePrompt(story)}
                 onViewPromptPack={() => handleViewPromptPack(story)}
                 hasPromptPack={storyPromptPacks[story.id] || false}
-                onClick={() => {
-                  setEditingStory(story);
-                  setEditForm({
-                    title: story.title,
-                    description: story.description || '',
-                    acceptanceCriteria: story.acceptanceCriteria || '',
-                    priority: story.priority,
-                    storyPoints: story.storyPoints || ''
-                  });
-                }}
+                onClick={() => handleEditStory(story)}
               />
             ))}
           </div>
         )}
       </div>
-
-      {showCreateModal && (
-        <CreateStoryModal
-          projectId={projectId}
-          onClose={() => setShowCreateModal(false)}
-          onCreated={() => {
-            setShowCreateModal(false);
-            onStoriesChange();
-          }}
-        />
-      )}
-
-      {showPromptGenerator && selectedStory && (
-        <PromptPackGenerator
-          story={selectedStory}
-          analysis={analysis}
-          onClose={() => {
-            setShowPromptGenerator(false);
-            setSelectedStory(null);
-          }}
-          onGenerated={() => {
-            onStoriesChange();
-            checkPromptPacks(); // Refresh prompt pack status
-          }}
-        />
-      )}
-
-      {showPromptViewer && selectedStory && (
-        <PromptPackViewer
-          story={selectedStory}
-          analysis={analysis}
-          onClose={() => {
-            setShowPromptViewer(false);
-            setSelectedStory(null);
-          }}
-          onRegenerated={() => {
-            onStoriesChange();
-            checkPromptPacks(); // Refresh prompt pack status
-          }}
-        />
-      )}
-
-      {editingStory && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-gray-900/90 backdrop-blur-md border border-purple-500/20 rounded-lg p-6 w-full max-w-2xl max-h-[80vh] overflow-auto">
-            <div className="flex items-start justify-between mb-4">
-              <h2 className="text-xl font-semibold text-white">Edit Story</h2>
-              <button
-                onClick={() => {
-                  setEditingStory(null);
-                  setEditForm({});
-                }}
-                className="text-gray-400 hover:text-white transition-colors"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">Title</label>
-                <input
-                  type="text"
-                  value={editForm.title || ''}
-                  onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
-                  className="w-full px-3 py-2 bg-gray-800/60 border border-gray-700/50 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">Description</label>
-                <textarea
-                  value={editForm.description || ''}
-                  onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
-                  rows={3}
-                  className="w-full px-3 py-2 bg-gray-800/60 border border-gray-700/50 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">Acceptance Criteria</label>
-                <textarea
-                  value={editForm.acceptanceCriteria || ''}
-                  onChange={(e) => setEditForm({ ...editForm, acceptanceCriteria: e.target.value })}
-                  rows={4}
-                  className="w-full px-3 py-2 bg-gray-800/60 border border-gray-700/50 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  placeholder="Enter acceptance criteria..."
-                />
-              </div>
-
-              <div className="flex space-x-4">
-                <div className="flex-1">
-                  <label className="block text-sm font-medium text-gray-300 mb-1">Priority</label>
-                  <select
-                    value={editForm.priority || 'MEDIUM'}
-                    onChange={(e) => setEditForm({ ...editForm, priority: e.target.value })}
-                    className="w-full px-3 py-2 bg-gray-800/60 border border-gray-700/50 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  >
-                    <option value="LOW">Low</option>
-                    <option value="MEDIUM">Medium</option>
-                    <option value="HIGH">High</option>
-                    <option value="CRITICAL">Critical</option>
-                  </select>
-                </div>
-
-                <div className="flex-1">
-                  <label className="block text-sm font-medium text-gray-300 mb-1">Story Points</label>
-                  <input
-                    type="number"
-                    value={editForm.storyPoints || ''}
-                    onChange={(e) => setEditForm({ ...editForm, storyPoints: e.target.value })}
-                    className="w-full px-3 py-2 bg-gray-800/60 border border-gray-700/50 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    placeholder="1, 2, 3, 5, 8..."
-                  />
-                </div>
-              </div>
-
-              <div className="flex justify-end space-x-3 pt-4">
-                <button
-                  onClick={() => {
-                    setEditingStory(null);
-                    setEditForm({});
-                  }}
-                  className="px-4 py-2 text-gray-300 hover:text-white transition-colors"
-                >
-                  Close
-                </button>
-                <button
-                  onClick={handleSaveStory}
-                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-md transition-colors"
-                >
-                  Save
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       <DeleteConfirmModal
         isOpen={deleteStoryModal.show}
